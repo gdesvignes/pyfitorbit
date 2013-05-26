@@ -1,0 +1,12 @@
+	fitorbit
+
+This program is a clone of fitorbit originally written in Fortran at JBO.
+
+Requirements:
+-------------
+	numpy
+	scipy
+	pygtk > 2.3.9
+	pyslalib
+	matplotlib
+
