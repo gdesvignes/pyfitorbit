@@ -10,7 +10,8 @@ from optparse import OptionParser
 from matplotlib.figure import Figure
 from scipy.optimize import leastsq
 import math 
-import pyslalib as slalib
+#import pyslalib as slalib
+from pyslalib import *
 import numpy as np
 
 import matplotlib
@@ -365,13 +366,29 @@ class Manager(gtk.Window):
 	for i in range(len(self.p2f)):
 	    #print self.label[i]
 	    if self.label[i]=='RA':
-		(rah,ram,ras) = self.local_entry[i].get_text().split(':')
-		(ra_radian,flag) = slalib.sla_dtf2r(rah,ram,ras)
+		raj_entry = self.local_entry[i].get_text().split(':')
+		ra_radian = 0.0
+		if len(raj_entry) > 1:
+		    # Entry in HH:MM:SS
+		    (rah,ram,ras) = raj_entry
+		    (ra_radian,flag) = slalib.sla_dtf2r(rah,ram,ras)
+		else:
+		    # Entry in radians
+		    ra_radian = float(raj_entry[0])
+
 	        self.p2f[self.label[i]].val = ra_radian 
 
 	    elif self.label[i]=='DEC':
-		(dech,decm,decs) = self.local_entry[i].get_text().split(':')
-		(dec_radian,flag) = slalib.sla_daf2r(dech,decm,decs)
+		decj_entry = self.local_entry[i].get_text().split(':')
+		dec_radian = 0.0
+		if len(decj_entry) > 1:
+		    # Entry in HH:MM:SS
+		    (dech,decm,decs) = decj_entry
+		    (dec_radian,flag) = slalib.sla_dtf2r(dech,decm,decs)
+		else:
+		    # Entry in radians
+		    dec_radian = float(decj_entry[0])
+
 	        self.p2f[self.label[i]].val = dec_radian 
 	    else:
 	        self.p2f[self.label[i]].val = float(self.local_entry[i].get_text())
@@ -410,13 +427,29 @@ class Manager(gtk.Window):
 	self.fit_values = []
 	for i in range(len(self.p2f)):
 	    if self.label[i]=='RA':
-		(rah,ram,ras) = self.local_entry[i].get_text().split(':')
-		(ra_radian,flag) = slalib.sla_dtf2r(rah,ram,ras)
+		raj_entry = self.local_entry[i].get_text().split(':')
+		ra_radian = 0.0
+		if len(raj_entry) > 1:
+		    # Entry in HH:MM:SS
+		    (rah,ram,ras) = raj_entry
+		    (ra_radian,flag) = slalib.sla_dtf2r(rah,ram,ras)
+		else:
+		    # Entry in radians
+		    ra_radian = float(raj_entry[0])
+
 	        self.fit_values.append( ra_radian )
 
 	    elif self.label[i]=='DEC':
-		(dech,decm,decs) = self.local_entry[i].get_text().split(':')
-		(dec_radian,flag) = slalib.sla_daf2r(dech,decm,decs)
+		decj_entry = self.local_entry[i].get_text().split(':')
+		dec_radian = 0.0
+		if len(decj_entry) > 1:
+		    # Entry in HH:MM:SS
+		    (dech,decm,decs) = decj_entry
+		    (dec_radian,flag) = slalib.sla_dtf2r(dech,decm,decs)
+		else:
+		    # Entry in radians
+		    dec_radian = float(decj_entry[0])
+
 	        self.fit_values.append( dec_radian )
 	    else:
 	        self.fit_values.append( float(self.local_entry[i].get_text()) )
