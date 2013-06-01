@@ -2,7 +2,7 @@
 
 import numpy as Num
 try:
-    from slalib import *
+    from pyslalib import *
 except :
 #except ImportError:
     print "Cannot import slalib"

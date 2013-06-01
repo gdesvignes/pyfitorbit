@@ -3,7 +3,7 @@ import math
 import sys
 import psr_utils as pu
 try:
-    from slalib import sla_ecleq, sla_eqecl, sla_eqgal
+    from pyslalib import sla_ecleq, sla_eqecl, sla_eqgal
     slalib = True
 except ImportError:
     slalib = False
