@@ -10,7 +10,7 @@ from optparse import OptionParser
 from matplotlib.figure import Figure
 from scipy.optimize import leastsq
 import math 
-import slalib
+import pyslalib as slalib
 import numpy as np
 
 import matplotlib

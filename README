@@ -10,3 +10,10 @@ Requirements:
 	pyslalib
 	matplotlib
 
+Requirements since Preso removal:
+    ppgplot (see Rutger's github)
+
+Original requirement removed:
+    presto (copied required files to fitorbit)
+
+
