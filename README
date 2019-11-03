@@ -1,12 +1,11 @@
-	fitorbit
+fitorbit.py
 
-This program is a clone of fitorbit originally written in Fortran at JBO.
+A program to solve a pulsar orbit from a set of search observation (list of periods, Presto's PFD files)
 
 Requirements:
 -------------
+	python3
 	numpy
 	scipy
-	pygtk > 2.3.9
-	pyslalib
 	matplotlib
-
+	astropy
