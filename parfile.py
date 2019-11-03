@@ -1,13 +1,12 @@
-from types import StringType, FloatType
+import six
 import math
 import sys
-import psr_utils as pu
 try:
     from slalib import sla_ecleq, sla_eqecl, sla_eqgal
     slalib = True
 except ImportError:
     slalib = False
-    
+
 #
 # The following are the parameters that are accepted in a
 # par file when trying to determine a pulsar ephemeris.
@@ -31,8 +30,8 @@ except ImportError:
 #  EPS2     Second Laplace parameter [eccentricity times cos(omega)]
 #  EPS1DOT  Time derivative of EPS1
 #  EPS2DOT  Time derivative of EPS2
-#  OMDOT    Rate of periastron advance (deg/yr) 
-#  PBDOT    Rate of change of orbital period (10^-12) 
+#  OMDOT    Rate of periastron advance (deg/yr)
+#  PBDOT    Rate of change of orbital period (10^-12)
 #  XDOT     Rate of change of projected semi-major axis (-12)
 #  EDOT     Rate of change of eccentricity (-12)
 #
@@ -71,21 +70,21 @@ class Parfile:
         setattr(self,'EPHEM','')
         setattr(self,'BINARY',"BT")
 
-	use_eclip = False # Use ecliptic coordinates
-	use_ell = False # Use elliptic coordinates
+        use_eclip = False # Use ecliptic coordinates
+        use_ell = False # Use elliptic coordinates
 
-	if parfile:
-	    self.read(parfile)
+        if parfile:
+            self.read(parfile)
 
     def __str__(self):
         out = ""
         for k, v in self.__dict__.items():
             if k[:2]!="__":
-                if type(self.__dict__[k]) is StringType:
+                if type(self.__dict__[k]) in six.string_types:
                     out += "%10s = '%s'\n" % (k, v)
                 else:
                     out += "%10s = %-20.15g\n" % (k, v)
-	return out	    
+        return out
 
     def read(self, parfilenm):
         self.FILE = parfilenm
@@ -94,35 +93,35 @@ class Parfile:
             # Convert any 'D-' or 'D+' to 'E-' or 'E+'
             line = line.replace("D-", "E-")
             line = line.replace("D+", "E+")
-	    try:
-              splitline = line.split()
-              key = splitline[0]
-              if key in str_keys:
-                setattr(self, key, splitline[1])
-              elif key in float_keys:
-                try:
-                    setattr(self, key, float(splitline[1]))
-                except ValueError:
-                    pass
-              if len(splitline)==3:  # Some parfiles don't have flags, but do have errors
-                if splitline[2] not in ['0', '1']:
-                    setattr(self, key+'_ERR', float(splitline[2]))
-              if len(splitline)==4:
-                setattr(self, key+'_ERR', float(splitline[3]))
-	    except:
-	      print ''
-	# Read PSR name      
+            try:
+                splitline = line.split()
+                key = splitline[0]
+                if key in str_keys:
+                    setattr(self, key, splitline[1])
+                elif key in float_keys:
+                    try:
+                        setattr(self, key, float(splitline[1]))
+                    except ValueError:
+                        pass
+                if len(splitline)==3:  # Some parfiles don't have flags, but do have errors
+                    if splitline[2] not in ['0', '1']:
+                        setattr(self, key+'_ERR', float(splitline[2]))
+                if len(splitline)==4:
+                    setattr(self, key+'_ERR', float(splitline[3]))
+            except:
+                print ('')
+        # Read PSR name
         if hasattr(self, 'PSR'):
             setattr(self, 'PSR', self.PSR)
         if hasattr(self, 'PSRJ'):
             setattr(self, 'PSRJ', self.PSRJ)
         # Deal with Ecliptic coords
         if (hasattr(self, 'BETA') and hasattr(self, 'LAMBDA')):
-	    self.use_eclip = True
+            self.use_eclip = True
             setattr(self, 'ELAT', self.BETA)
             setattr(self, 'ELONG', self.LAMBDA)
         if (slalib and hasattr(self, 'ELAT') and hasattr(self, 'ELONG')):
-	    self.use_eclip = True
+            self.use_eclip = True
             if hasattr(self, 'POSEPOCH'):
                 epoch = self.POSEPOCH
             else:
@@ -165,28 +164,28 @@ class Parfile:
             if hasattr(self, 'P1_ERR'):
                 f, ferr, fd, fderr = pu.pferrs(self.P0, self.P0_ERR,
                                                self.P1, self.P1_ERR)
-                setattr(self, 'F0_ERR', ferr) 
-                setattr(self, 'F1', fd) 
-                setattr(self, 'F1_ERR', fderr) 
+                setattr(self, 'F0_ERR', ferr)
+                setattr(self, 'F1', fd)
+                setattr(self, 'F1_ERR', fderr)
             else:
                 f, fd, = pu.p_to_f(self.P0, self.P1)
                 setattr(self, 'F0_ERR', self.P0_ERR/(self.P0*self.P0))
-                setattr(self, 'F1', fd) 
+                setattr(self, 'F1', fd)
         if hasattr(self, 'F0_ERR'):
             if hasattr(self, 'F1_ERR'):
                 p, perr, pd, pderr = pu.pferrs(self.F0, self.F0_ERR,
                                                self.F1, self.F1_ERR)
-                setattr(self, 'P0_ERR', perr) 
-                setattr(self, 'P1', pd) 
-                setattr(self, 'P1_ERR', pderr) 
+                setattr(self, 'P0_ERR', perr)
+                setattr(self, 'P1', pd)
+                setattr(self, 'P1_ERR', pderr)
             else:
                 p, pd, = pu.p_to_f(self.F0, self.F1)
                 setattr(self, 'P0_ERR', self.F0_ERR/(self.F0*self.F0))
-                setattr(self, 'P1', pd) 
+                setattr(self, 'P1', pd)
         if hasattr(self, 'DM'):
             setattr(self, 'DM', self.DM)
         if hasattr(self, 'EPS1') and hasattr(self, 'EPS2'):
-	    self.use_ell = True
+            self.use_ell = True
             ecc = math.sqrt(self.EPS1 * self.EPS1 + self.EPS2 * self.EPS2)
             omega = math.atan2(self.EPS1, self.EPS2)
             setattr(self, 'ECC', ecc)
@@ -198,25 +197,35 @@ class Parfile:
     def write(self, parfilenm):
 #    def write(self, parfilenm, p2f, param):
         out = ""
-	for k in par_keys:
-	    if hasattr(self, k):
-	        v = self.__dict__[k]
-                if type(self.__dict__[k]) is StringType:
+        for k in par_keys:
+            if hasattr(self, k):
+                v = self.__dict__[k]
+                if type(self.__dict__[k]) in six.string_types:
                     out += "%s %27s\n" % (k, v)
                 else:
                     out += "%-12s%20.15g\n" % (k, v)
-	print out	    
+        print (out)
 
         pfo = open(parfilenm,'w')
-	pfo.write(out)
-	pfo.close()
+        pfo.write(out)
+        pfo.close()
 
     def set_param(self, param, value):
+        if hasattr(self, 'P0'):
+            if self.P0:
+                setattr(self, 'F0', 1.0/self.P0)
+            else:
+                setattr(self, 'F0', 0.0)
+        if hasattr(self, 'P1'):
+            if self.P1:
+                setattr(self, 'F1', -self.P1/(self.P0*self.P0))
+            else:
+                setattr(self, 'F1', 0.0)
         setattr(self, param, value)
 
 
 
 if __name__ == '__main__':
     a = Parfile(sys.argv[1])
-    print a
+    print (a)
     #a.write("test.par")

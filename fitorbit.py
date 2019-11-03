@@ -1,44 +1,46 @@
 #!/usr/bin/env python
 
-import gobject
-import gtk
-import os, sys
+
+import os
+import sys
 import time
+import math
+from tkinter import filedialog
+from tkinter import *
 
 from optparse import OptionParser
 
-from matplotlib.figure import Figure
-from scipy.optimize import leastsq
-import math 
-import slalib
 import numpy as np
+from scipy.optimize import leastsq
 
 import matplotlib
-matplotlib.use('GtkAgg')
-from matplotlib.backends.backend_gtkagg import FigureCanvasGTKAgg as FigureCanvas
-from matplotlib.backends.backend_gtk import NavigationToolbar2GTK as NavigationToolbar
+matplotlib.use('TkAgg')
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as FigureCanvas
+from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk as NavigationToolbar
 from matplotlib.ticker import ScalarFormatter
 
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+
 import parfile
-from utils import eccentric_anomaly
+import bestprof
+import utils
 
 DEG2RAD    = float('1.7453292519943295769236907684886127134428718885417e-2')
 RAD2DEG    = float('57.295779513082320876798154814105170332405472466564')
-C	   = float('2.99792458e8')
+C          = float('2.99792458e8')
 
 full_usage = """
-usage : fitorbit.py [options] File
+usage : fitorbit.py [options] [*.bestprof]
 
   [-h, --help]        : Display this help
-  [-f, --freq]        : Convert File from frequency
-  [-m, --ms]          : Convert File from period in ms
 
-  File is a list of 
-  MJDs  Period/Freq  Unc
+  Bestprof files as produced by Presto
 
 """
 
-usage = "usage: %prog [options]"  
+usage = "usage: %prog [options]"
 
 
 PARAMS = ['RA', 'DEC', 'P0', 'P1', 'PEPOCH', 'PB', 'ECC', 'A1', 'T0', 'OM']
@@ -46,148 +48,158 @@ PARAMS = ['RA', 'DEC', 'P0', 'P1', 'PEPOCH', 'PB', 'ECC', 'A1', 'T0', 'OM']
 class Param:
     def __init__(self, is_string=False):
         self.val = 0.0
-	if is_string:
-	    self.val = "00:00:00.0"
-	self.fit = 0
+        if is_string:
+            self.val = "00:00:00.0"
+        self.fit = 0
 
+class Data:
+    def __init__(self):
+        self.mjds = []
+        self.period = []
+        self.unc = []
 
-# Quit Function
-def quit(action, self):
-    gtk.main_quit();
-    return False
+    def add(self, mjd1, period1, ptype='ms'):
+        self.mjds.append(mjd1)
+        if  ptype=='ms':
+            self.period.append(period1)
+        elif  ptype=='s':
+            self.period.append(period1*1000.)
 
-def activate_action(action,self):
-    print 'Action "%s" activated' % action.get_name()
+    def set_mjd(self, mjd):
+        self.mjds = mjd
 
+    def set_period(self, period):
+        self.period = period
 
-def readfile(filename, flgfreq, flgms):
-    """
-    Open a file 'filename and
-    Return MJD and Period for N-pts
-    """
-    mjds, ps = np.loadtxt(filename, usecols=(0,1), unpack=True)
+    def set_unc(self, uncertainties):
+        self.unc = uncertainties
 
-    # Frequency given in data
-    if flgfreq:
-      ps=1/ps
-    # Period in ms given in data  
-    if flgms:
-      ps=ps*1.
-    else:
-      ps=ps*1000.
-    return mjds, ps
+    def get_mjd(self):
+        return self.mjds
+
+    def get_period(self):
+        return self.period
+
+    def get_unc(self):
+        return self.unc
 
 # Function to calc the expected period at a time x (in MJD) given the parameters
 def calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC):
 
-    k1 = 2*np.pi*A1/(PB*86400.0*np.sqrt(1-ECC*ECC))
+    if PB:
 
-    # Calc easc in rad
-    easc = 2*np.arctan(np.sqrt((1-ECC)/(1+ECC)) * np.tan(-OM*DEG2RAD/2))
-    #print easc
-    epperias = T0 - PB/360.0*(RAD2DEG * easc - RAD2DEG * ECC * np.sin(easc))
-    #print x,epperias
-    mean_anom = 360*(x-epperias)/PB
-    mean_anom = np.fmod(mean_anom,360.0)
-    #if mean_anom<360.0:
-    #  mean_anom+=360.0
-    mean_anom = np.where(np.greater(mean_anom, 360.0), mean_anom-360.0, mean_anom)
-	
-    # Return ecc_anom (in rad) by iteration
-    ecc_anom = eccentric_anomaly(ECC, mean_anom*DEG2RAD)
+        k1 = 2*np.pi*A1/(PB*86400.0*np.sqrt(1-ECC*ECC))
 
-    # Return true anomaly in deg
-    true_anom = 2*RAD2DEG*np.arctan(np.sqrt((1+ECC)/(1-ECC))*np.tan(ecc_anom/2))
+        # Calc easc in rad
+        easc = 2*np.arctan(np.sqrt((1-ECC)/(1+ECC)) * np.tan(-OM*DEG2RAD/2))
+        #print easc
+        epperias = T0 - PB/360.0*(RAD2DEG * easc - RAD2DEG * ECC * np.sin(easc))
+        #print x,epperias
+        mean_anom = 360*(x-epperias)/PB
+        mean_anom = np.fmod(mean_anom,360.0)
+        #if mean_anom<360.0:
+        #  mean_anom+=360.0
+        mean_anom = np.where(np.greater(mean_anom, 360.0), mean_anom-360.0, mean_anom)
 
-    #print "easc=%f  epperias=%f  mean_anom=%f  ecc_anom=%f  true_anom=%f"%(easc,epperias,mean_anom,ecc_anom,true_anom)
-    #sys.exit()
+        # Return ecc_anom (in rad) by iteration
+        ecc_anom = utils.eccentric_anomaly(ECC, mean_anom*DEG2RAD)
 
-    #print RA, DEC
-    #dv = deltav(x, RA, DEC, RA-DRA, DEC-DDEC, 2000.0)
-    #print dv
+        # Return true anomaly in deg
+        true_anom = 2*RAD2DEG*np.arctan(np.sqrt((1+ECC)/(1-ECC))*np.tan(ecc_anom/2))
 
-    return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*(true_anom+OM)) )
+        #print "easc=%f  epperias=%f  mean_anom=%f  ecc_anom=%f  true_anom=%f"%(easc,epperias,mean_anom,ecc_anom,true_anom)
+        #sys.exit()
+
+        #print RA, DEC
+        #dv = utils.deltav(x, RA, DEC, RA-DRA, DEC-DDEC, 2000.0)
+        #print dv
+
+        return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*(true_anom+OM)) )
+        return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*true_anom)+ECC*np.cos(OM) - np.sin(true_anom)*np.sin(OM))
+    #return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*(true_anom+OM) + k1*ECC*np.cos(OM)) ) * (1-dv/3e8)
     #return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*(true_anom+OM)) ) * (1-20000/C)
+    else:
+        return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400)
 
 # Function to calc Period residual y-f(x,...)
-def resid_period(param, Pobs, x, fit, fixed_values):
+def timing_fcn(param, Pobs, x, fit, fixed_values):
     """
     param : value of the M parameters to fit
     Pobs : array of the f(x) values
     x : array of the x values
 
-    fit : Array of N parameters which indicate the M parameters to fit  
+    fit : Array of N parameters which indicate the M parameters to fit
     fixed_values : values of the fixed parameters
     """
 
     nb_fit=0
 
 
-    # DRA 
+    # DRA
     if fit[0]!=0:
-	nb_fit+=1
-    DRA = 0.0 
+        nb_fit+=1
+    DRA = 0.0
 
     # DDEC
     if fit[1]!=0:
-	nb_fit+=1
-    DDEC = 0.0 
+        nb_fit+=1
+    DDEC = 0.0
 
     # P0
     if fit[2]!=0:
-	P0 = param[nb_fit]
-	nb_fit+=1
+        P0 = param[nb_fit]
+        nb_fit+=1
     else:
-	P0 = fixed_values[2]
+        P0 = fixed_values[2]
 
     # P1
     if fit[3]!=0:
-	P1 = param[nb_fit]
-	nb_fit +=1
+        P1 = param[nb_fit]
+        nb_fit +=1
     else:
-	P1 = fixed_values[3]
+        P1 = fixed_values[3]
 
     # PEPOCH
     if fit[4]!=0:
-	PEPOCH = param[nb_fit]
-	nb_fit +=1
+        PEPOCH = param[nb_fit]
+        nb_fit +=1
     else:
-	PEPOCH = fixed_values[4] 
+        PEPOCH = fixed_values[4]
 
     # PB
     if fit[5]!=0:
-	PB = param[nb_fit]
-	nb_fit +=1
+        PB = param[nb_fit]
+        nb_fit +=1
     else:
-	PB = fixed_values[5]
+        PB = fixed_values[5]
 
     # ECC
     if fit[6]!=0:
-	ECC = param[nb_fit]
-	nb_fit +=1
+        ECC = param[nb_fit]
+        nb_fit +=1
     else:
-	ECC = fixed_values[6]
+        ECC = fixed_values[6]
 
     # A1
     if fit[7]!=0:
-	A1 = param[nb_fit]
-	nb_fit +=1
+        A1 = param[nb_fit]
+        nb_fit +=1
     else:
-	A1 = fixed_values[7]
+        A1 = fixed_values[7]
 
     # T0
     if fit[8]!=0:
-	T0 = param[nb_fit]
-	nb_fit +=1
+        T0 = param[nb_fit]
+        nb_fit +=1
     else:
-	T0 = fixed_values[8]
+        T0 = fixed_values[8]
 
     # A1
     if fit[9]!=0:
-	OM = param[nb_fit]
-	nb_fit +=1
+        OM = param[nb_fit]
+        nb_fit +=1
     else:
-	OM = fixed_values[9]
+        OM = fixed_values[9]
 
     # RA
     RA = fixed_values[0]
@@ -195,496 +207,360 @@ def resid_period(param, Pobs, x, fit, fixed_values):
 
     return Pobs - calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC)
 
+class Application(Frame):
 
-# Declarations for MENU
-entries = (
-  ( "FileMenu", None, "File" ),               # name, stock id, label
-  ( "PreferencesMenu", None, "Preferences" ), # name, stock id, label
-  ( "HelpMenu", None, "Help" ),               # name, stock id, label
-  ( "Save", gtk.STOCK_SAVE, "_Save","<control>S", "Save current file", activate_action ),
-  ( "SaveAs", gtk.STOCK_SAVE, "Save _As...","<control>A", "Save to a file", activate_action ),
-  ( "Quit", gtk.STOCK_QUIT, "_Quit", "<control>Q", "Quit", quit  ),
-  ( "About", None, "_About", "<control>H", "About", activate_action ),
-  ( "Logo", "demo-gtk-logo", None, None, "GTK+", activate_action ),
-)
+    def __init__(self, filenames, master=None):
 
+        super().__init__(master)
+        self.master = master
 
-ui_info = \
-'''<ui>
-  <menubar name='MenuBar'>
-    <menu action='FileMenu'>
-      <menuitem action='Save'/>
-      <menuitem action='SaveAs'/>
-      <separator/>
-      <menuitem action='Quit'/>
-    </menu>
-    <menu action='PreferencesMenu'>
-    </menu>
-    <menu action='HelpMenu'>
-      <menuitem action='About'/>
-    </menu>
-  </menubar>
-  <toolbar  name='ToolBar'>
-    <toolitem action='Quit'/>
-    <separator action='Sep1'/>
-    <toolitem action='Logo'/>
-  </toolbar>
-</ui>'''
+        self.data = Data()
 
+        if filenames:
+            suffix = '.bestprof'
+            for fn in filenames:
+                if fn.endswith(suffix):
+                    prof = bestprof.bestprof(fn)
+                    for minute in np.arange(int(prof.T/60.0+0.5)):
+                        t = minute * 60.
+                        time = prof.epochi + prof.epochf + minute/1440.0
+                        period = prof.p0 + t*(prof.p1 + 0.5*t*prof.p2)
 
+                        self.data.add(time, period, ptype='s')
 
-class Manager(gtk.Window):
+            try:
+                mjds, periods, uncertainties = np.loadtxt(filenames[0], usecols=(0,1,2), unpack=True)
+                self.data.set_mjd(mjds)
+                self.data.set_period(periods)
+                self.data.set_unc(uncertainties)
+                print (self.data.get_mjd(), self.data.get_period(), self.data.get_unc())
+            except:
+                print ("Input format not recognized")
+                raise
 
-    def __init__(self, filename, parent=None):
+        # Variables Init
+        self.ra_str = "00:00:00"
+        self.dec_str = "+00:00:00"
+        self.init_parameters()
 
-	self.mjds, self.periods = readfile(filename, opts.freq, opts.ms)
+        # Build Main window
+        self.create_ui()
 
-	# Variables Init
-	self.init_param_file()
+        self.draw_options()
 
-	# Build Main window
-        gtk.Window.__init__(self)
-        try:
-            self.set_screen(parent.get_screen())
-        except AttributeError:
-            self.connect('destroy', quit, self)
-        self.set_title("Fit Orbit")
-	self.set_size_request(800,600)
-        self.set_border_width(0)
+        self.draw_param()
 
+        self.set_entries()
 
-	# Build main menu
-        self.actions = gtk.ActionGroup("Actions")
-	self.actions.add_actions(entries,self)
-        ui = gtk.UIManager()
-        ui.insert_action_group(self.actions, 0)
-        self.add_accel_group(ui.get_accel_group())
-        try:
-            mergeid = ui.add_ui_from_string(ui_info)
-        except gobject.GError, msg:
-            print "building menus failed: %s" % msg
-
-	# Add box for main menu
-        box1 = gtk.VBox(False, 0)
-        self.add(box1)
-        box1.pack_start(ui.get_widget("/MenuBar"), False, False, 0)
-
-	self.box12 = gtk.HBox(False, 0)
-	box1.pack_start(self.box12, True, True, 0)
-
-	# Add box for options menu
-        self.box_opt = gtk.HBox(False, 0)
-	self.draw_options()
-        self.box12.pack_start(self.box_opt, False, False, 0)
-
-	# Add box for parameters menu
-        self.box_param = gtk.VBox(False, 0)
-	self.draw_param()
-        self.box12.pack_start(self.box_param, True, True, 0)
-
-	# Add graphic box and display Label
-	self.xlabel="MJD"
-	self.ylabel="Period (ms)"
-	self.fig = Figure(facecolor='white')
-	self.ax1 = self.fig.add_subplot(1,1,1)
-
+        # Add graphic box and display Label
+        self.xlabel="MJD"
+        self.ylabel="Period (ms)"
+        self.fig = Figure(facecolor='white')
+        self.ax1 = self.fig.add_subplot(1,1,1)
+        
         ###########
-	left, width = 0.1, 0.8
-	rect1 = [left, 0.1, width, 0.7]
-	rect2 = [left, 0.8, width, 0.1]
+        #left, width = 0.1, 0.8
+        #rect1 = [left, 0.1, width, 0.7]
+        #rect2 = [left, 0.8, width, 0.1]
 
 
-	self.ax1.set_xlabel(self.xlabel)
-	self.ax1.set_ylabel(self.ylabel)
-	self.ax1.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
-	self.ax1.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
-	self.canvas = FigureCanvas(self.fig)  
-	self.box_param.pack_start(self.canvas, True, True, 0)
+        self.ax1.set_xlabel(self.xlabel)
+        self.ax1.set_ylabel(self.ylabel)
+        self.ax1.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        self.ax1.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        self.canvas = FigureCanvas(self.fig, master=master)
+        #self.canvas.grid(row=8)
+        #self.canvas.draw()
+        #self.box_param.pack_start(self.canvas, True, True, 0)
 
-	# Add Toolbar box
-	toolbar = NavigationToolbar(self.canvas, self)
-	self.box_param.pack_start(toolbar, False, False)
+        # Add Toolbar box
+        #toolbar = NavigationToolbar(self.canvas, self)
+        #self.box_param.pack_start(toolbar, False, False)
 
-	# plot
-	self.ax1.plot(self.mjds,self.periods,'r+',ms=9)
+        # plot
+        print ("Have Unc?", self.data.get_unc())
+        if len(self.data.get_unc()):
+            self.ax1.errorbar(self.data.get_mjd(), self.data.get_period(), yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
+        else:
+            self.ax1.scatter(self.data.get_mjd(), self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
 
-        self.show_all()
+        self.canvas.get_tk_widget().grid(row=6,columnspan=6, sticky=N+S+E+W)
+        self.canvas.draw()
 
-    def init_param_file(self):
+    # Quit Function
+    #def quit(self):
+        #gtk.main_quit();
+        #return False
+
+    def donothing(self):
+        #print ('Action "%s" activated' % action.get_name())
+        print('donothing')
+        
+    def create_ui(self):
+        
+        menubar = Menu(self.master)
+        filemenu = Menu(menubar, tearoff=0)
+        filemenu.add_command(label="Open", command=self.open_parfile)
+        filemenu.add_command(label="Save", command=self.write_parfile)
+        #filemenu.add_command(label="Save as...", command=self.donothing)
+
+        filemenu.add_separator()
+
+        filemenu.add_command(label="Exit", command=self.master.quit)
+        menubar.add_cascade(label="File", menu=filemenu)
+        editmenu = Menu(menubar, tearoff=0)
+        editmenu.add_command(label="Undo", command=self.donothing)
+
+        helpmenu = Menu(menubar, tearoff=0)
+        helpmenu.add_command(label="Help Index", command=self.donothing)
+        helpmenu.add_command(label="About...", command=self.donothing)
+        menubar.add_cascade(label="Help", menu=helpmenu)
+        
+        self.master.config(menu=menubar)
+        #root.mainloop()
+
+    def init_parameters(self):
         """
-	Init parameters of PARFILE
-	     fit_flag[] : which parameters to fit
-	     fit_values=[] : values of parameters
-	"""
+        Init timing parameters
+             fit_flag[] : which parameters to fit
+             fit_values=[] : values of parameters
+        """
         self.param = parfile.Parfile()
 
-	# Array for LM fit
-	self.fit_flag=[]
-	self.fit_values=[]
-	self.param2fit=[]
-	self.mjds2=[]
-	self.ps2=[]
+        # Array for LM fit
+        self.fit_flag=[]
+        self.fit_values=[]
+        self.param2fit=[]
+        self.mjds2=[]
+        self.ps2=[]
 
-	# Dict p2f for parameters to fit
-	self.p2f={}
-	self.label=[]
-	for PARAM in PARAMS:
-	    if PARAM=="RA" or PARAM=="DEC":
-		self.p2f[PARAM] = Param(is_string=True)
-	    else:	
-		self.p2f[PARAM] = Param()
-	    self.label.append(PARAM)
-
-
-	# Init self.fit to 0
-	for i in range(len(self.p2f)):
-	    self.fit_flag.append(0)
+        # Dict p2f for parameters to fit
+        self.p2f={}
+        self.label=[]
+        for PARAM in PARAMS:
+            if PARAM=="RA" or PARAM=="DEC":
+                self.p2f[PARAM] = Param(is_string=True)
+            else:
+                self.p2f[PARAM] = Param()
+            self.label.append(PARAM)
+            self.p2f[PARAM].val = 0.0
 
 
-    def read_param_file(self):
-        self.param.read(self.param_filename)
+        # Init self.fit to 0
+        for i in range(len(self.p2f)):
+            self.fit_flag.append(0)
 
-	self.p2f['RA'].val = self.param.RAJ
-	self.p2f['DEC'].val = self.param.DECJ
-	self.p2f['P0'].val = self.param.P0
-	self.p2f['P1'].val = self.param.P1/1e-15
-	self.p2f['PEPOCH'].val = self.param.PEPOCH
-	self.p2f['PB'].val = self.param.PB
-	self.p2f['ECC'].val = self.param.ECC
-	self.p2f['A1'].val = self.param.A1
-	self.p2f['T0'].val = self.param.T0
-	self.p2f['OM'].val = self.param.OM
 
-    def write_param_file(self):
-	for PARAM in PARAMS:
-	    self.param.set_param(PARAM, self.p2f[PARAM].val)
+    def read_parfile(self, filename):
+        self.parfile = filename
+        self.param.read(self.parfile)
+
+        s = SkyCoord(self.param.RAJ, self.param.DECJ, unit=(u.hourangle, u.deg), frame='icrs')
+
+        self.p2f['RA'].val = s.ra.radian
+        self.p2f['DEC'].val = s.dec.radian
+        self.p2f['P0'].val = self.param.P0
+        self.p2f['P1'].val = self.param.P1/1e-15
+        self.p2f['PEPOCH'].val = self.param.PEPOCH
+        self.p2f['PB'].val = self.param.PB
+        self.p2f['ECC'].val = self.param.ECC
+        self.p2f['A1'].val = self.param.A1
+        self.p2f['T0'].val = self.param.T0
+        self.p2f['OM'].val = self.param.OM
+
+    def write_parfile(self):
+        for PARAM in PARAMS:
+            self.param.set_param(PARAM, self.p2f[PARAM].val)
+        filename =  filedialog.asksaveasfilename(title = "Save file")
+        self.param.write(filename)
 
     def plot_model(self, widget=None):
 
-	# Retrieve values from the query
-	for i in range(len(self.p2f)):
-	    #print self.label[i]
-	    if self.label[i]=='RA':
-		(rah,ram,ras) = self.local_entry[i].get_text().split(':')
-		(ra_radian,flag) = slalib.sla_dtf2r(rah,ram,ras)
-	        self.p2f[self.label[i]].val = ra_radian 
+        self.get_entries()
 
-	    elif self.label[i]=='DEC':
-		(dech,decm,decs) = self.local_entry[i].get_text().split(':')
-		(dec_radian,flag) = slalib.sla_daf2r(dech,decm,decs)
-	        self.p2f[self.label[i]].val = dec_radian 
-	    else:
-	        self.p2f[self.label[i]].val = float(self.local_entry[i].get_text())
-	        #print i, self.label[i], self.p2f[self.label[i]].val, self.local_entry[i].get_text()
-	  
-	# Init arrays
-        xs=np.linspace(min(self.mjds),max(self.mjds),2000)
+        # Init arrays
+        xs=np.linspace(min(self.data.get_mjd()), max(self.data.get_mjd()), 20000)
 
 
-        ys=calc_period(xs, 0.0, 0.0, self.p2f['P0'].val, self.p2f['P1'].val, self.p2f['PEPOCH'].val, self.p2f['PB'].val, self.p2f['ECC'].val, self.p2f['A1'].val, self.p2f['T0'].val, self.p2f['OM'].val, self.p2f['RA'].val, self.p2f['DEC'].val) 
+        ys=calc_period(xs, 0.0, 0.0, self.p2f['P0'].val, self.p2f['P1'].val, self.p2f['PEPOCH'].val, self.p2f['PB'].val, self.p2f['ECC'].val, self.p2f['A1'].val, self.p2f['T0'].val, self.p2f['OM'].val, self.p2f['RA'].val, self.p2f['DEC'].val)
 
-	
-	# Convert into a Numpy array
-	ys=np.asarray(ys)
 
-	# Redraw plot
-	self.ax1.cla()
-	self.ax1.plot(self.mjds,self.periods,'r+',ms=9)
-	line, = self.ax1.plot(xs, ys)
+        # Convert into a Numpy array
+        ys=np.asarray(ys)
 
-	# Label and axis
-	self.ax1.set_xlabel(self.xlabel)
-	self.ax1.set_ylabel(self.ylabel)
-	self.ax1.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
-	self.ax1.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        # Redraw plot
+        self.ax1.cla()
+        #print "Have Unc?", self.data.get_unc()
+        if len(self.data.get_unc()):
+            self.ax1.errorbar(self.data.get_mjd(), self.data.get_period(), yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
+        else:
+            self.ax1.scatter(self.data.get_mjd(), self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
+        line, = self.ax1.plot(xs, ys)
+
+        # Label and axis
+        self.ax1.set_xlabel(self.xlabel)
+        self.ax1.set_ylabel(self.ylabel)
+        self.ax1.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        self.ax1.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
 
         self.canvas.draw()
 
 
     def fit_model(self, widget=None):
         """
-	Function to perform the fit of selected parameters to the values
-	"""
-	
-	# Retrieve values of parameters
-	self.fit_values = []
-	for i in range(len(self.p2f)):
-	    if self.label[i]=='RA':
-		(rah,ram,ras) = self.local_entry[i].get_text().split(':')
-		(ra_radian,flag) = slalib.sla_dtf2r(rah,ram,ras)
-	        self.fit_values.append( ra_radian )
+        Function to perform the fit of selected parameters to the values
+        """
 
-	    elif self.label[i]=='DEC':
-		(dech,decm,decs) = self.local_entry[i].get_text().split(':')
-		(dec_radian,flag) = slalib.sla_daf2r(dech,decm,decs)
-	        self.fit_values.append( dec_radian )
-	    else:
-	        self.fit_values.append( float(self.local_entry[i].get_text()) )
+        # Retrieve values of parameters
+        self.fit_values = []
+        self.get_entries()
+        for ii in range(len(self.p2f)):
+            self.fit_values.append(self.p2f[self.label[ii]].val)
 
+        # Set input parameters
+        self.intput_param = []
+        for ii,param in enumerate(self.v):
+            if param.get():
+                self.intput_param.append( self.fit_values[ii] )
+                self.fit_flag[ii] = 1
+            else:
+                self.fit_flag[ii] = 0
 
-	# Get which parameters will be fitted
-	self.param2fit = []
-	for i,dofit in enumerate(self.fit_flag):
-	    if dofit:
-	        self.param2fit.append( self.fit_values[i] )
+        # If no parameters will be fitted, return now !
+        if not self.intput_param:
+            return
 
-	# If not parameters will be fitted, return now !
-	if not self.param2fit:
-	    return
-
-
-	# Retrieve which points to include (points in the window)
-	self.ps2=[]
-	self.mjds2=[]
+        # Retrieve which points to include (points in the window)
+        self.ps2=[]
+        self.mjds2=[]
         xmin,xmax=self.ax1.get_xlim()
-	for ii, mjd in enumerate(self.mjds):
-	    if(xmin<mjd and mjd<xmax):
-	      self.mjds2.append(mjd)
-	      self.ps2.append(self.periods[ii])
+        for mjd,period in zip(self.data.get_mjd(), self.data.get_period()):
+            if(xmin<mjd and mjd<xmax):
+                self.mjds2.append(mjd)
+                self.ps2.append(period)
 
-	self.mjds2 = np.asarray(self.mjds2)
-	self.ps2 = np.asarray(self.ps2)
-	#print self.mjds2,self.ps2
+        self.mjds2 = np.asarray(self.mjds2)
+        self.ps2 = np.asarray(self.ps2)
+        #print self.mjds2,self.ps2
 
-	# Do least square fit
-	print 'Input Parameters :\n',self.param2fit
-	#print self.ps2, self.mjds2, self.fit_flag, self.fit_values
-	plsq = leastsq(resid_period, self.param2fit, args=(self.ps2, self.mjds2, self.fit_flag, self.fit_values))
-	print 'Parameters fitted :\n', plsq[0]
-	#print resid_period(self.param2fit,self.ps2, self.mjds2, self.fit, self.fit_values)
+        # Do least square fit
+        print ('Input Parameters :\n',self.intput_param)
+        plsq = leastsq(timing_fcn, self.intput_param, args=(self.ps2, self.mjds2, self.fit_flag, self.fit_values))
+        print ('Parameters fitted :\n', plsq[0])
 
-	print 'chi**2 = ',np.sum(np.power(resid_period(self.param2fit,self.ps2, self.mjds2, self.fit_flag, self.fit_values),2))
-	# Return new parameters values in boxes
-	j=0
-	for i,dofit in enumerate(self.fit_flag):
-	  #print i,dofit, plsq
-	  if dofit:
-	    if sum(self.fit_flag)>=1:
-	        self.local_entry[i].set_text(str(plsq[0][j]))
-	        j+=1
-	    else:
-	        self.local_entry[i].set_text(str(plsq[0]))
+        print ('chi**2 = ',np.sum(np.power(timing_fcn(self.intput_param,self.ps2, self.mjds2, self.fit_flag, self.fit_values),2)))
+        # Return new parameters values in boxes
+        j=0
+        for i,dofit in enumerate(self.fit_flag):
+            #print i,dofit, plsq
+            if dofit:
+                if sum(self.fit_flag)>=1:
+                    val = plsq[0][j]
+                else:
+                    val = plsq[0]
 
-	# Update the plot
-	self.plot_model()	
+                self.p2f[self.label[i]].val = val
+                j+=1
 
+        # Update the parameters entries
+        self.set_entries()
 
+        # Update the plot
+        self.plot_model()
 
-    def read_param_file_select(self, widget):
+    def open_parfile(self):
+        root.filename =  filedialog.askopenfilename(initialdir = "/",title = "Select file")
+        print (root.filename)
+        if root.filename:
+            self.read_parfile(root.filename)
+            self.set_entries()
+            self.plot_model()
 
-	# Setup the dialog box
-	dialog = gtk.FileChooserDialog("Open Parfile",None,gtk.FILE_CHOOSER_ACTION_OPEN, (gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OK, gtk.RESPONSE_OK))
-	dialog.set_default_response(gtk.RESPONSE_OK)
-	response = dialog.run()
-	if response == gtk.RESPONSE_OK:
-	    self.param_filename = dialog.get_filename()
-	    self.read_param_file()
-	elif response == gtk.RESPONSE_CANCEL:
-	    print 'Closed'
-	dialog.destroy()  
+    def set_entries(self):
+        for ii in range(len(self.p2f)):
+            self.entry[ii].delete(0, END)
+            if self.label[ii]=='RA':
+                s = SkyCoord(self.p2f['RA'].val, self.p2f['DEC'].val , unit='radian', frame='icrs')
+                print( s.ra.to_string(sep=':', unit='hourangle'))
+                self.entry[ii].insert(0, s.ra.to_string(sep=':', unit='hourangle'))
+            elif self.label[ii]=='DEC':
+                s = SkyCoord(self.p2f['RA'].val, self.p2f['DEC'].val, unit='radian', frame='icrs')
+                print(  s.dec.to_string(sep=':', unit=u.deg))
+                self.entry[ii].insert(0, s.dec.to_string(sep=':', unit=u.deg))
+            else:
+                self.entry[ii].insert(0, self.p2f[self.label[ii]].val)
 
-	for i,val in enumerate(self.p2f):
-	    self.local_entry[i].set_text(str(self.p2f[self.label[i]].val))
-
-	self.show_all()
-
-    def write_param_file_select(self, widget):
-
-	# Setup the dialog box
-	dialog = gtk.FileChooserDialog("Save Parfile",None,gtk.FILE_CHOOSER_ACTION_SAVE, (gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OK, gtk.RESPONSE_OK))
-	dialog.set_default_response(gtk.RESPONSE_OK)
-	response = dialog.run()
-
-	#
-	if response == gtk.RESPONSE_OK:
-	    new_filename = dialog.get_filename()
-	    self.p2f['P1'].val = self.param.P1*1e-15
-
-	    # Update the parameters in the Parfile Class
-	    self.write_param_file()
-	    # Write the file 
-	    self.param.write(new_filename)
-	    self.p2f['P1'].val = self.param.P1/1e-15
-	elif response == gtk.RESPONSE_CANCEL:
-	    print 'Closed'
-
-	dialog.destroy()  
+    def get_entries(self):
+        for ii in range(len(self.p2f)):
+            if self.label[ii]=='RA':
+                self.ra_str = self.entry[ii].get()
+                s = SkyCoord(self.ra_str, self.dec_str, unit=(u.hourangle, u.deg), frame='icrs')
+                self.p2f[self.label[ii]].val = s.ra.radian
+            elif self.label[ii]=='DEC':
+                self.dec_str = self.entry[ii].get()
+                s = SkyCoord(self.ra_str, self.dec_str, unit=(u.hourangle, u.deg), frame='icrs')
+                self.p2f[self.label[ii]].val = s.dec.radian
+            else:
+                self.p2f[self.label[ii]].val = float(self.entry[ii].get())
 
     def key_press_menu(self, event):
         """
-	"""
+        """
 
         if event.key=='x':
-	    self.fit_model()
+            self.fit_model()
+        if event.key=='p':
+            self.plot_model()
 
 
     def draw_options(self):
 
-	#self.frame1 = gtk.Frame()
-	#self.frame1.set_shadow_type(gtk.SHADOW_IN)
-	#self.frame1.set_size_request(60, 60)
+        # Button "Load Parfile"
+        bpar = Button(self.master, text="Load ParFile", command = self.open_parfile)
+        bpar.grid(row=0, column=0) 
 
-	self.box_buttons = gtk.VBox(False, 0)
-	self.box_opt.pack_start(self.box_buttons, False, False, 0)
+        # Button "Save"
+        bsave = Button(self.master, text="Save ParFile", command = self.write_parfile)
+        bsave.grid(row=1, column=0)
 
-	# Button "Load Parfile"
-	button_load_par = gtk.Button("Load ParFile")
-	self.box_buttons.pack_start(button_load_par, False, False, 0)
-	button_load_par.connect("clicked", self.read_param_file_select)
+        # Button "Plot Model"
+        bplot = Button(self.master, text="Plot Model", command = self.plot_model)
+        bplot.grid(row=2, column=0)
 
-	# Button "Plot Model"
-	button_plot_model = gtk.Button("Plot Model")
-	self.box_buttons.pack_start(button_plot_model, False, False, 0)
-	button_plot_model.connect("clicked", self.plot_model)
-
-	# Button "Fit"
-	button_fit = gtk.Button("Fit Model")
-	self.box_buttons.pack_start(button_fit, False, False, 0)
-	button_fit.connect("clicked", self.fit_model)
-
-	# Button "Save"
-	button_save = gtk.Button("Save Parfile")
-	self.box_buttons.pack_start(button_save, False, False, 0)
-	button_save.connect("clicked", self.write_param_file_select)
-
+        # Button "Fit"
+        bfit = Button(self.master, text="Fit Model", command = self.fit_model)
+        bfit.grid(row=3, column=0)
 
     # Which param to held fixed
-    def set_fit(self, widget, data=None):
-        print "Parameter %s was toggled %s" % (data, ("OFF", "ON")[widget.get_active()])
-
-	status = ("OFF", "ON")[widget.get_active()]
-
-	if status=='ON':
-	    self.fit_flag[self.label.index(data)]=1
-	elif status=='OFF':
-	    self.fit_flag[self.label.index(data)]=0
-
+    def set_fit(self, ii):
+        #print ("Parameter %s was toggled %s" % (data, ("OFF", "ON")[widget.get_active()]))
+        print (self.v[ii].get())
+        if self.v[ii].get():
+            self.v[ii].set(0)
+        else:
+            self.v[ii].set(1)
 
     def draw_param(self):
-        """
-	Draw parameters menu
-	"""
-        table = gtk.Table(5,6, False)
-        table.set_row_spacings(4)
-        table.set_col_spacings(4)
-        self.box_param.pack_start(table, False, True, 0)
 
-	self.local_entry=[]
-
-        # RA
-	i=0
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "RA")
-	table.attach(check_button, 0, 1, 0, 1, gtk.SHRINK)
-	label = gtk.Label("RA")
-	table.attach(label, 1, 2, 0, 1, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-
-        self.local_entry[i].set_text(str(self.p2f['RA'].val))
-        table.attach(self.local_entry[i], 2, 3, 0, 1, gtk.EXPAND|gtk.FILL)
-
-	# DEC
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "DEC")
-	table.attach(check_button, 0, 1, 1, 2, gtk.SHRINK)
-	label = gtk.Label("DEC")
-	table.attach(label, 1, 2, 1, 2, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['DEC'].val))
-        table.attach(self.local_entry[i], 2, 3, 1, 2, gtk.EXPAND|gtk.FILL)
-
-	# P0
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "P0")
-	table.attach(check_button, 0, 1, 2, 3, gtk.SHRINK)
-	label = gtk.Label("P (s)")
-	table.attach(label, 1, 2, 2, 3, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['P0'].val))
-        table.attach(self.local_entry[i], 2, 3, 2, 3, gtk.EXPAND|gtk.FILL)
-
-	# P1
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "P1")
-	table.attach(check_button, 0, 1, 3, 4, gtk.SHRINK)
-	label = gtk.Label("Pdot(e-15)")
-	table.attach(label, 1, 2, 3, 4, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['P1'].val))
-        table.attach(self.local_entry[i], 2, 3, 3, 4, gtk.EXPAND|gtk.FILL)
-
-	# Pepoch
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "PEPOCH")
-	table.attach(check_button, 0, 1, 4, 5, gtk.SHRINK)
-	label = gtk.Label("Pepoch")
-	table.attach(label, 1, 2, 4, 5, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['PEPOCH'].val))
-        table.attach(self.local_entry[i], 2, 3, 4, 5, gtk.EXPAND|gtk.FILL)
-
-
-	# Second colum of parameters
-
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "PB")
-	table.attach(check_button, 3, 4, 0, 1, gtk.SHRINK)
-	label = gtk.Label("Porb")
-	table.attach(label, 4, 5, 0, 1, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['PB'].val))
-        table.attach(self.local_entry[i], 5, 6, 0, 1, gtk.EXPAND|gtk.FILL)
-
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "ECC")
-	table.attach(check_button, 3, 4, 1, 2, gtk.SHRINK)
-	label = gtk.Label("Ecc")
-	table.attach(label, 4, 5, 1, 2, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['ECC'].val))
-        table.attach(self.local_entry[i], 5, 6, 1, 2, gtk.EXPAND|gtk.FILL)
-
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "A1")
-	table.attach(check_button, 3, 4, 2, 3, gtk.SHRINK)
-	label = gtk.Label("A1")
-	table.attach(label, 4, 5, 2, 3, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['A1'].val))
-        table.attach(self.local_entry[i], 5, 6, 2, 3, gtk.EXPAND|gtk.FILL)
-
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "T0")
-	table.attach(check_button, 3, 4, 3, 4, gtk.SHRINK)
-	label = gtk.Label("T0")
-	table.attach(label, 4, 5, 3, 4, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['T0'].val))
-        table.attach(self.local_entry[i], 5, 6, 3, 4, gtk.EXPAND|gtk.FILL)
-
-	# OM
-	i+=1
-        check_button = gtk.CheckButton()
-        check_button.connect('toggled', self.set_fit, "OM")
-	table.attach(check_button, 3, 4, 4, 5, gtk.SHRINK)
-	label = gtk.Label("Om")
-	table.attach(label, 4, 5, 4, 5, gtk.SHRINK)
-        self.local_entry.append(gtk.Entry())
-        self.local_entry[i].set_text(str(self.p2f['OM'].val))
-        table.attach(self.local_entry[i], 5, 6, 4, 5, gtk.EXPAND|gtk.FILL)
+        #self.ivar = IntVar()
+        self.v = [0] * len(PARAMS)
+        self.checkbut = [None] * len(PARAMS)
+        self.entry = [None] * len(PARAMS)
+        ii = 0
+        for i in range(0,5):
+            for j in range(0,2):
+                self.v[ii] = IntVar()
+                self.v[ii].set(0)
+                self.checkbut[ii] = Checkbutton(self.master, text = self.label[ii], variable = self.v, command= lambda ii=ii: self.set_fit(ii))
+                self.checkbut[ii].grid(row=i, column=1+j*2)
+                self.entry[ii] = Entry(self.master)
+                self.entry[ii].grid(row=i, column=2+j*2)
+                ii += 1
 
 
 if __name__ == '__main__':
 
-    usage = "usage: %prog [options] -f period.dat"  
+    usage = "usage: %prog [options] -f period.dat"
 
     parser = OptionParser(usage)
     parser.add_option("-c", "--convert_f", action="store_true", dest="freq", default=False, help="Use frequency")
@@ -694,13 +570,11 @@ if __name__ == '__main__':
     (opts, args) = parser.parse_args()
 
     if len(args)==0:
-	print full_usage
-	sys.exit(0)
+        print (full_usage)
 
-    if gtk.pygtk_version <(2,3,90):
-	print "PyGtk 2.3.90 or later is required"
-	raise SystemExit
 
-    Manager(sys.argv[1])
-    gtk.main()
-
+    root = Tk()
+    root.title('fitorbit.py')
+    root.geometry("950x700+10+10")
+    app = Application(args, master=root)
+    app.mainloop()
