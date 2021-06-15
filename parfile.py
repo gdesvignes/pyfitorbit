@@ -1,6 +1,7 @@
 import six
 import math
 import sys
+from presto import psr_utils as pu
 try:
     from slalib import sla_ecleq, sla_eqecl, sla_eqgal
     slalib = True

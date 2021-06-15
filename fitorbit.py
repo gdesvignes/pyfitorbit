@@ -24,7 +24,7 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 
 import parfile
-import bestprof
+import presto.bestprof
 import utils
 
 DEG2RAD    = float('1.7453292519943295769236907684886127134428718885417e-2')
