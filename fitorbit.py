@@ -474,7 +474,8 @@ class Application(Frame):
         if root.filename:
             self.read_parfile(root.filename)
             self.set_entries()
-            self.plot_model()
+            if len(self.mjds):
+                self.plot_model()
 
     def set_entries(self):
         for ii in range(len(self.p2f)):
