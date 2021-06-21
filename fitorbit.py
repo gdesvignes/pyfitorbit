@@ -24,7 +24,7 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 
 import parfile
-import presto.bestprof
+import presto.bestprof as bestprof
 import utils
 
 DEG2RAD    = float('1.7453292519943295769236907684886127134428718885417e-2')
@@ -216,18 +216,22 @@ class Application(Frame):
 
         self.data = Data()
 
-        if filenames:
-            suffix = '.bestprof'
-            for fn in filenames:
-                if fn.endswith(suffix):
-                    prof = bestprof.bestprof(fn)
-                    for minute in np.arange(int(prof.T/60.0+0.5)):
-                        t = minute * 60.
-                        time = prof.epochi + prof.epochf + minute/1440.0
-                        period = prof.p0 + t*(prof.p1 + 0.5*t*prof.p2)
+        suffix = '.bestprof'
+        nbestprof = 0
+        for fn in filenames:
+            if fn.endswith(suffix):
+                prof = bestprof.bestprof(fn)
+                for minute in np.arange(int(prof.T/60.0+0.5)):
+                    t = minute * 60.
+                    time = prof.epochi + prof.epochf + minute/1440.0
+                    period = prof.p0 + t*(prof.p1 + 0.5*t*prof.p2)
 
-                        self.data.add(time, period, ptype='s')
+                    self.data.add(time, period, ptype='s')
+                nbestprof += 1
+                
+        print ("Loaded %d bestprof files", nbestprof)
 
+        if (not nbestprof):
             try:
                 mjds, periods, uncertainties = np.loadtxt(filenames[0], usecols=(0,1,2), unpack=True)
                 self.data.set_mjd(mjds)
