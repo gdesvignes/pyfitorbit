@@ -225,15 +225,15 @@ class Application(Frame):
                     t = minute * 60.
                     time = prof.epochi + prof.epochf + minute/1440.0
                     period = prof.p0 + t*(prof.p1 + 0.5*t*prof.p2)
-                    #print (fn, t, time, period)
+                    print (fn, t, time, period)
 
                     
                     self.data.add(time, period, ptype='s')
                 nbestprof += 1
                 
-        print ("Loaded %d bestprof files"%nbestprof)
+        print ("Loaded %d bestprof files", nbestprof)
 
-        if (not nbestprof):
+        if not nbestprof:
             try:
                 mjds, periods, uncertainties = np.loadtxt(filenames[0], usecols=(0,1,2), unpack=True)
                 self.data.set_mjd(mjds)
@@ -293,7 +293,7 @@ class Application(Frame):
         else:
             self.ax1.scatter(self.data.get_mjd(), self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
 
-            self.canvas.get_tk_widget().grid(row=5,columnspan=6, sticky=N+S+E+W)
+        self.canvas.get_tk_widget().grid(row=5,columnspan=6, sticky=N+S+E+W)
         self.canvas.draw()
 
     # Quit Function
@@ -483,7 +483,7 @@ class Application(Frame):
         if root.filename:
             self.read_parfile(root.filename)
             self.set_entries()
-            if len(self.mjds):
+            if len(self.data.mjds):
                 self.plot_model()
 
     def set_entries(self):
