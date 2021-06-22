@@ -225,11 +225,13 @@ class Application(Frame):
                     t = minute * 60.
                     time = prof.epochi + prof.epochf + minute/1440.0
                     period = prof.p0 + t*(prof.p1 + 0.5*t*prof.p2)
+                    #print (fn, t, time, period)
 
+                    
                     self.data.add(time, period, ptype='s')
                 nbestprof += 1
                 
-        print ("Loaded %d bestprof files", nbestprof)
+        print ("Loaded %d bestprof files"%nbestprof)
 
         if (not nbestprof):
             try:
@@ -261,6 +263,7 @@ class Application(Frame):
         self.ylabel="Period (ms)"
         self.fig = Figure(facecolor='white')
         self.ax1 = self.fig.add_subplot(1,1,1)
+        self.ax1.format_coord = lambda x, y: ""
         
         ###########
         #left, width = 0.1, 0.8
@@ -278,8 +281,10 @@ class Application(Frame):
         #self.box_param.pack_start(self.canvas, True, True, 0)
 
         # Add Toolbar box
-        #toolbar = NavigationToolbar(self.canvas, self)
-        #self.box_param.pack_start(toolbar, False, False)
+        toolbar = NavigationToolbar(self.canvas, master, pack_toolbar=False)
+        toolbar.update()
+        toolbar.grid(row=6,columnspan=6)
+        #self.canvas.get_tk_widget().pack(toolbar)
 
         # plot
         print ("Have Unc?", self.data.get_unc())
@@ -288,7 +293,7 @@ class Application(Frame):
         else:
             self.ax1.scatter(self.data.get_mjd(), self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
 
-        self.canvas.get_tk_widget().grid(row=6,columnspan=6, sticky=N+S+E+W)
+            self.canvas.get_tk_widget().grid(row=5,columnspan=6, sticky=N+S+E+W)
         self.canvas.draw()
 
     # Quit Function
