@@ -24,7 +24,7 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 
 import parfile
-import presto.bestprof as bestprof
+import presto.bestprof
 import utils
 
 DEG2RAD    = float('1.7453292519943295769236907684886127134428718885417e-2')
@@ -92,13 +92,10 @@ def calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC):
 
         # Calc easc in rad
         easc = 2*np.arctan(np.sqrt((1-ECC)/(1+ECC)) * np.tan(-OM*DEG2RAD/2))
-        #print easc
-        epperias = T0 - PB/360.0*(RAD2DEG * easc - RAD2DEG * ECC * np.sin(easc))
-        #print x,epperias
+        epperias = T0 - PB/360.0*(easc - 180./np.pi * ECC * np.sin(easc))
+
         mean_anom = 360*(x-epperias)/PB
         mean_anom = np.fmod(mean_anom,360.0)
-        #if mean_anom<360.0:
-        #  mean_anom+=360.0
         mean_anom = np.where(np.greater(mean_anom, 360.0), mean_anom-360.0, mean_anom)
 
         # Return ecc_anom (in rad) by iteration
@@ -107,17 +104,12 @@ def calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC):
         # Return true anomaly in deg
         true_anom = 2*RAD2DEG*np.arctan(np.sqrt((1+ECC)/(1-ECC))*np.tan(ecc_anom/2))
 
-        #print "easc=%f  epperias=%f  mean_anom=%f  ecc_anom=%f  true_anom=%f"%(easc,epperias,mean_anom,ecc_anom,true_anom)
-        #sys.exit()
-
         #print RA, DEC
         #dv = utils.deltav(x, RA, DEC, RA-DRA, DEC-DDEC, 2000.0)
         #print dv
 
-        return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*(true_anom+OM)) )
-        return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*true_anom)+ECC*np.cos(OM) - np.sin(true_anom)*np.sin(OM))
-    #return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*(true_anom+OM) + k1*ECC*np.cos(OM)) ) * (1-dv/3e8)
-    #return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1+k1*np.cos(DEG2RAD*(true_anom+OM)) ) * (1-20000/C)
+        return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1 + k1*np.cos(DEG2RAD*(true_anom+OM)) + k1*ECC*np.cos(OM*DEG2RAD))
+        #return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1 + k1*np.cos(DEG2RAD*(true_anom+OM)) + k1*ECC*np.cos(OM*DEG2RAD)) * (1-dv/3e8)
     else:
         return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400)
 
@@ -209,31 +201,25 @@ def timing_fcn(param, Pobs, x, fit, fixed_values):
 
 class Application(Frame):
 
-    def __init__(self, filenames, master=None):
+    def __init__(self, filenames, master=None, input_parfile=None):
 
         super().__init__(master)
         self.master = master
 
         self.data = Data()
 
-        suffix = '.bestprof'
-        nbestprof = 0
-        for fn in filenames:
-            if fn.endswith(suffix):
-                prof = bestprof.bestprof(fn)
-                for minute in np.arange(int(prof.T/60.0+0.5)):
-                    t = minute * 60.
-                    time = prof.epochi + prof.epochf + minute/1440.0
-                    period = prof.p0 + t*(prof.p1 + 0.5*t*prof.p2)
-                    print (fn, t, time, period)
+        if filenames:
+            suffix = '.bestprof'
+            for fn in filenames:
+                if fn.endswith(suffix):
+                    prof = bestprof.bestprof(fn)
+                    for minute in np.arange(int(prof.T/60.0+0.5)):
+                        t = minute * 60.
+                        time = prof.epochi + prof.epochf + minute/1440.0
+                        period = prof.p0 + t*(prof.p1 + 0.5*t*prof.p2)
 
-                    
-                    self.data.add(time, period, ptype='s')
-                nbestprof += 1
-                
-        print ("Loaded %d bestprof files", nbestprof)
+                        self.data.add(time, period, ptype='s')
 
-        if not nbestprof:
             try:
                 mjds, periods, uncertainties = np.loadtxt(filenames[0], usecols=(0,1,2), unpack=True)
                 self.data.set_mjd(mjds)
@@ -258,12 +244,18 @@ class Application(Frame):
 
         self.set_entries()
 
+        if input_parfile:
+            self.read_parfile(input_parfile)
+            self.set_entries()
+            #if len(self.data.mjds):
+            #    self.plot_model()
+        
         # Add graphic box and display Label
         self.xlabel="MJD"
         self.ylabel="Period (ms)"
         self.fig = Figure(facecolor='white')
-        self.ax1 = self.fig.add_subplot(1,1,1)
-        self.ax1.format_coord = lambda x, y: ""
+        self.ax1 = self.fig.add_subplot(3, 1, (1,2))
+        self.ax2 = self.fig.add_subplot(3, 1, 3)
         
         ###########
         #left, width = 0.1, 0.8
@@ -275,16 +267,20 @@ class Application(Frame):
         self.ax1.set_ylabel(self.ylabel)
         self.ax1.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
         self.ax1.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+
+        self.ax2.set_xlabel(self.xlabel)
+        self.ax2.set_ylabel("Residuals (mP0)")
+        self.ax2.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        self.ax2.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        
         self.canvas = FigureCanvas(self.fig, master=master)
         #self.canvas.grid(row=8)
         #self.canvas.draw()
         #self.box_param.pack_start(self.canvas, True, True, 0)
 
         # Add Toolbar box
-        toolbar = NavigationToolbar(self.canvas, master, pack_toolbar=False)
-        toolbar.update()
-        toolbar.grid(row=6,columnspan=6)
-        #self.canvas.get_tk_widget().pack(toolbar)
+        #toolbar = NavigationToolbar(self.canvas, self)
+        #self.box_param.pack_start(toolbar, False, False)
 
         # plot
         print ("Have Unc?", self.data.get_unc())
@@ -293,7 +289,11 @@ class Application(Frame):
         else:
             self.ax1.scatter(self.data.get_mjd(), self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
 
-        self.canvas.get_tk_widget().grid(row=5,columnspan=6, sticky=N+S+E+W)
+        self.canvas.get_tk_widget().grid(row=6,columnspan=6, sticky=N+S+E+W)
+        
+        xmin, xmax = self.ax1.get_xlim()
+        self.ax2.set_xlim(xmin, xmax)
+                          
         self.canvas.draw()
 
     # Quit Function
@@ -399,6 +399,7 @@ class Application(Frame):
 
         # Redraw plot
         self.ax1.cla()
+        self.ax2.cla()
         #print "Have Unc?", self.data.get_unc()
         if len(self.data.get_unc()):
             self.ax1.errorbar(self.data.get_mjd(), self.data.get_period(), yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
@@ -412,6 +413,27 @@ class Application(Frame):
         self.ax1.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
         self.ax1.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
 
+
+        ym = calc_period(self.data.get_mjd(), 0.0, 0.0,
+                         self.p2f['P0'].val, self.p2f['P1'].val,
+                         self.p2f['PEPOCH'].val, self.p2f['PB'].val,
+                         self.p2f['ECC'].val, self.p2f['A1'].val,
+                         self.p2f['T0'].val, self.p2f['OM'].val,
+                         self.p2f['RA'].val, self.p2f['DEC'].val)
+        
+        ### Plot residuals ###
+        xmin, xmax = self.ax1.get_xlim()
+        if len(self.data.get_unc()):
+            self.ax2.errorbar(self.data.get_mjd(), (self.data.get_period() - ym) / self.p2f['P0'].val, yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
+        else:
+            self.ax2.scatter(self.data.get_mjd(), (self.data.get_period() - ym) / self.p2f['P0'].val, color='r',s=20,edgecolor='r',marker='o',zorder=10)
+
+        self.ax2.set_xlim(xmin, xmax)
+        self.ax2.set_xlabel(self.xlabel)
+        self.ax2.set_ylabel("Residuals (mP0)")
+        self.ax2.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        self.ax2.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        
         self.canvas.draw()
 
 
@@ -458,6 +480,7 @@ class Application(Frame):
         print ('Parameters fitted :\n', plsq[0])
 
         print ('chi**2 = ',np.sum(np.power(timing_fcn(self.intput_param,self.ps2, self.mjds2, self.fit_flag, self.fit_values),2)))
+
         # Return new parameters values in boxes
         j=0
         for i,dofit in enumerate(self.fit_flag):
@@ -470,7 +493,17 @@ class Application(Frame):
 
                 self.p2f[self.label[i]].val = val
                 j+=1
+                
+        # Wrap Omega if needed  
+        while self.p2f['OM'].val < 0:
+            self.p2f['OM'].val += 360.
+        while self.p2f['OM'].val > 360:
+            self.p2f['OM'].val -= 360.    
 
+        while self.p2f['A1'].val < 0:
+            self.p2f['A1'].val *= - 1
+            self.p2f['T0'].val += self.p2f['PB'].val/2.
+            
         # Update the parameters entries
         self.set_entries()
 
@@ -573,18 +606,21 @@ if __name__ == '__main__':
     usage = "usage: %prog [options] -f period.dat"
 
     parser = OptionParser(usage)
-    parser.add_option("-c", "--convert_f", action="store_true", dest="freq", default=False, help="Use frequency")
-    parser.add_option("-m", "--ms", action="store_true", dest="ms", default=False, help="Use period in ms")
-    parser.add_option("-f", "--file", type="string", dest="filename", help="Input file")
+    #parser.add_option("-c", "--convert_f", action="store_true", dest="freq", default=False, help="Use frequency")
+    #parser.add_option("-m", "--ms", action="store_true", dest="ms", default=False, help="Use period in ms")
+    parser.add_option("-f", "--parfile", type="string", dest="parfile", help="Input parfile")
 
     (opts, args) = parser.parse_args()
 
     if len(args)==0:
         print (full_usage)
 
+    if opts.parfile:
+        parfn = opts.parfile
+    else: parfn = None
 
     root = Tk()
     root.title('fitorbit.py')
     root.geometry("950x700+10+10")
-    app = Application(args, master=root)
+    app = Application(args, master=root, input_parfile=parfn)
     app.mainloop()
