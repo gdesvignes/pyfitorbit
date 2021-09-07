@@ -90,9 +90,8 @@ def calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC):
 
         k1 = 2*np.pi*A1/(PB*86400.0*np.sqrt(1-ECC*ECC))
 
-        # Calc easc in rad
         easc = 2*np.arctan(np.sqrt((1-ECC)/(1+ECC)) * np.tan(-OM*DEG2RAD/2))
-        epperias = T0 - PB/360.0*(easc - 180./np.pi * ECC * np.sin(easc))
+        epperias = T0 - PB/360.0*(easc - 180./np.pi * ECC * np.sin(easc * DEG2RAD))
 
         mean_anom = 360*(x-epperias)/PB
         mean_anom = np.fmod(mean_anom,360.0)
@@ -225,7 +224,7 @@ class Application(Frame):
                 self.data.set_mjd(mjds)
                 self.data.set_period(periods)
                 self.data.set_unc(uncertainties)
-                print (self.data.get_mjd(), self.data.get_period(), self.data.get_unc())
+                #print (self.data.get_mjd(), self.data.get_period(), self.data.get_unc())
             except:
                 print ("Input format not recognized")
                 raise
@@ -283,7 +282,7 @@ class Application(Frame):
         #self.box_param.pack_start(toolbar, False, False)
 
         # plot
-        print ("Have Unc?", self.data.get_unc())
+        #print ("Have Unc?", self.data.get_unc())
         if len(self.data.get_unc()):
             self.ax1.errorbar(self.data.get_mjd(), self.data.get_period(), yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
         else:
@@ -603,7 +602,7 @@ class Application(Frame):
 
 if __name__ == '__main__':
 
-    usage = "usage: %prog [options] -f period.dat"
+    usage = "usage: %prog [options] <bestprof files or period files>"
 
     parser = OptionParser(usage)
     #parser.add_option("-c", "--convert_f", action="store_true", dest="freq", default=False, help="Use frequency")
