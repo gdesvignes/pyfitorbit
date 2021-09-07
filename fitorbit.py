@@ -250,9 +250,11 @@ class Application(Frame):
             #    self.plot_model()
         
         # Add graphic box and display Label
+        self.plot_orbital=False
         self.xlabel="MJD"
         self.ylabel="Period (ms)"
         self.fig = Figure(facecolor='white')
+        self.fig.canvas.mpl_connect('key_press_event', self.key_press_menu)
         self.ax1 = self.fig.add_subplot(3, 1, (1,2))
         self.ax2 = self.fig.add_subplot(3, 1, 3)
         
@@ -382,16 +384,14 @@ class Application(Frame):
         filename =  filedialog.asksaveasfilename(title = "Save file")
         self.param.write(filename)
 
-    def plot_model(self, widget=None):
+    def plot_model(self, widget=None, orbital=False):
 
         self.get_entries()
 
         # Init arrays
         xs=np.linspace(min(self.data.get_mjd()), max(self.data.get_mjd()), 20000)
 
-
         ys=calc_period(xs, 0.0, 0.0, self.p2f['P0'].val, self.p2f['P1'].val, self.p2f['PEPOCH'].val, self.p2f['PB'].val, self.p2f['ECC'].val, self.p2f['A1'].val, self.p2f['T0'].val, self.p2f['OM'].val, self.p2f['RA'].val, self.p2f['DEC'].val)
-
 
         # Convert into a Numpy array
         ys=np.asarray(ys)
@@ -400,12 +400,31 @@ class Application(Frame):
         self.ax1.cla()
         self.ax2.cla()
         #print "Have Unc?", self.data.get_unc()
-        if len(self.data.get_unc()):
-            self.ax1.errorbar(self.data.get_mjd(), self.data.get_period(), yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
-        else:
-            self.ax1.scatter(self.data.get_mjd(), self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
-        line, = self.ax1.plot(xs, ys)
 
+        if orbital:
+            Xval = np.modf((self.data.get_mjd()-self.p2f['T0'].val)/self.p2f['PB'].val)[0]
+            Xval = np.where(Xval<0, Xval+1, Xval)
+            #print (Xval)
+            XMval = np.modf((xs-self.p2f['T0'].val)/self.p2f['PB'].val)[0]
+            XMval = np.where(XMval<0, XMval+1, XMval)
+
+            ids = np.argsort(XMval)
+            YMval = ys[ids]
+            XMval = XMval[ids]
+            self.xlabel = "Orbital phase"
+        else:
+            Xval = self.data.get_mjd()
+            XMval = xs
+            YMval = ys
+            self.xlabel = "MJD"
+        
+        if len(self.data.get_unc()):
+            self.ax1.errorbar(Xval, self.data.get_period(), yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
+        else:
+            self.ax1.scatter(Xval, self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
+
+        line, = self.ax1.plot(XMval, YMval, zorder=20)
+        
         # Label and axis
         self.ax1.set_xlabel(self.xlabel)
         self.ax1.set_ylabel(self.ylabel)
@@ -423,9 +442,9 @@ class Application(Frame):
         ### Plot residuals ###
         xmin, xmax = self.ax1.get_xlim()
         if len(self.data.get_unc()):
-            self.ax2.errorbar(self.data.get_mjd(), (self.data.get_period() - ym) / self.p2f['P0'].val, yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
+            self.ax2.errorbar(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
         else:
-            self.ax2.scatter(self.data.get_mjd(), (self.data.get_period() - ym) / self.p2f['P0'].val, color='r',s=20,edgecolor='r',marker='o',zorder=10)
+            self.ax2.scatter(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, color='r',s=20,edgecolor='r',marker='o',zorder=10)
 
         self.ax2.set_xlim(xmin, xmax)
         self.ax2.set_xlabel(self.xlabel)
@@ -463,7 +482,11 @@ class Application(Frame):
         # Retrieve which points to include (points in the window)
         self.ps2=[]
         self.mjds2=[]
-        xmin,xmax=self.ax1.get_xlim()
+        if self.plot_orbital:
+            xmin = np.min(self.data.get_mjd())
+            xmax = np.max(self.data.get_mjd())
+        else:
+            xmin,xmax=self.ax1.get_xlim()
         for mjd,period in zip(self.data.get_mjd(), self.data.get_period()):
             if(xmin<mjd and mjd<xmax):
                 self.mjds2.append(mjd)
@@ -507,7 +530,7 @@ class Application(Frame):
         self.set_entries()
 
         # Update the plot
-        self.plot_model()
+        self.plot_model(orbital=self.plot_orbital)
 
     def open_parfile(self):
         root.filename =  filedialog.askopenfilename(initialdir = "/",title = "Select file")
@@ -548,12 +571,15 @@ class Application(Frame):
     def key_press_menu(self, event):
         """
         """
-
+        print('you pressed', event.key, event.xdata, event.ydata)
         if event.key=='x':
             self.fit_model()
         if event.key=='p':
+            self.plot_orbital=False
             self.plot_model()
-
+        if event.key=='o':
+            self.plot_orbital=True
+            self.plot_model(orbital=True)
 
     def draw_options(self):
 
@@ -602,7 +628,12 @@ class Application(Frame):
 
 if __name__ == '__main__':
 
-    usage = "usage: %prog [options] <bestprof files or period files>"
+    usage = """usage: %prog [options] <bestprof files or period files>
+    Press the following Keys:
+        p: Plot periods vs MJD
+        o: Plot periods vs orbital phase
+        f: Fit the parameters
+"""
 
     parser = OptionParser(usage)
     #parser.add_option("-c", "--convert_f", action="store_true", dest="freq", default=False, help="Use frequency")
