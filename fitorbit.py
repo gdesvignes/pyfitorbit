@@ -32,11 +32,15 @@ RAD2DEG    = float('57.295779513082320876798154814105170332405472466564')
 C          = float('2.99792458e8')
 
 full_usage = """
-usage : fitorbit.py [options] [*.bestprof]
+usage : fitorbit.py [options] [*.bestprof or period file]
 
   [-h, --help]        : Display this help
 
   Bestprof files as produced by Presto
+
+  File with MJD, periods, period uncertainties
+
+  
 
 """
 
@@ -257,6 +261,8 @@ class Application(Frame):
         self.fig.canvas.mpl_connect('key_press_event', self.key_press_menu)
         self.ax1 = self.fig.add_subplot(3, 1, (1,2))
         self.ax2 = self.fig.add_subplot(3, 1, 3)
+        self.ax1.format_coord = lambda x, y: ""
+        self.ax2.format_coord = lambda x, y: ""
         
         ###########
         #left, width = 0.1, 0.8
@@ -291,17 +297,40 @@ class Application(Frame):
             self.ax1.scatter(self.data.get_mjd(), self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
 
         self.canvas.get_tk_widget().grid(row=6,columnspan=6, sticky=N+S+E+W)
+
+        toolbarFrame = Frame(master=root)
+        toolbarFrame.grid(row=7,columnspan=6)
+        toolbar = NavigationToolbar(self.canvas, toolbarFrame)
+
+        self.connect()
+        #self.cidAx1 = self.ax1.callbacks.connect('xlim_changed', self.on_xlims_change)
+        #self.ax1.callbacks.connect('ylim_changed', self.on_ylims_change)
+        #self.cidAx2 = self.ax2.callbacks.connect('xlim_changed', self.on_xlims_change)
+        #self.ax2.callbacks.connect('ylim_changed', self.on_ylims_change)
         
         xmin, xmax = self.ax1.get_xlim()
         self.ax2.set_xlim(xmin, xmax)
                           
         self.canvas.draw()
+        
+    def connect(self):
+        #print("Connect to callbacks")
+        self.cidAx1 = self.ax1.callbacks.connect('xlim_changed', self.on_xlims_change)
+        self.cidAx2 = self.ax2.callbacks.connect('xlim_changed', self.on_xlims_change)
 
-    # Quit Function
-    #def quit(self):
-        #gtk.main_quit();
-        #return False
-
+    def disconnect(self):
+        self.ax1.callbacks.disconnect(self.cidAx1)
+        self.ax2.callbacks.disconnect(self.cidAx2)
+        
+    def on_xlims_change(self, event_ax):
+        
+        xmin, xmax =  event_ax.get_xlim()
+        #self.ax1.set_xlim(xmin, xmax)
+        #print(xmin, xmax)
+        self.disconnect()
+        self.ax2.set_xlim(xmin, xmax)
+        self.connect()
+            
     def donothing(self):
         #print ('Action "%s" activated' % action.get_name())
         print('donothing')
@@ -378,30 +407,37 @@ class Application(Frame):
         self.p2f['T0'].val = self.param.T0
         self.p2f['OM'].val = self.param.OM
 
+    def has_model(self):
+        if self.p2f['P0'].val and self.p2f['PB'].val and self.p2f['A1'].val:
+            return True
+        else:
+            return False
+        
     def write_parfile(self):
         for PARAM in PARAMS:
             self.param.set_param(PARAM, self.p2f[PARAM].val)
         filename =  filedialog.asksaveasfilename(title = "Save file")
         self.param.write(filename)
 
-    def plot_model(self, widget=None, orbital=False):
+    def plot_model(self, widget=None):
 
         self.get_entries()
 
         # Init arrays
         xs=np.linspace(min(self.data.get_mjd()), max(self.data.get_mjd()), 20000)
 
-        ys=calc_period(xs, 0.0, 0.0, self.p2f['P0'].val, self.p2f['P1'].val, self.p2f['PEPOCH'].val, self.p2f['PB'].val, self.p2f['ECC'].val, self.p2f['A1'].val, self.p2f['T0'].val, self.p2f['OM'].val, self.p2f['RA'].val, self.p2f['DEC'].val)
+        if self.has_model():
+            ys=calc_period(xs, 0.0, 0.0, self.p2f['P0'].val, self.p2f['P1'].val, self.p2f['PEPOCH'].val, self.p2f['PB'].val, self.p2f['ECC'].val, self.p2f['A1'].val, self.p2f['T0'].val, self.p2f['OM'].val, self.p2f['RA'].val, self.p2f['DEC'].val)
 
-        # Convert into a Numpy array
-        ys=np.asarray(ys)
+            # Convert into a Numpy array
+            ys=np.asarray(ys)
 
         # Redraw plot
         self.ax1.cla()
         self.ax2.cla()
         #print "Have Unc?", self.data.get_unc()
 
-        if orbital:
+        if self.plot_orbital and self.has_model():
             Xval = np.modf((self.data.get_mjd()-self.p2f['T0'].val)/self.p2f['PB'].val)[0]
             Xval = np.where(Xval<0, Xval+1, Xval)
             #print (Xval)
@@ -412,10 +448,18 @@ class Application(Frame):
             YMval = ys[ids]
             XMval = XMval[ids]
             self.xlabel = "Orbital phase"
+        elif self.plot_orbital:
+            print("No orbital model")
+            Xval = self.data.get_mjd()
+            XMval = xs
+            if self.has_model():
+                YMval = ys
+            self.xlabel = "MJD"
         else:
             Xval = self.data.get_mjd()
             XMval = xs
-            YMval = ys
+            if self.has_model():
+                YMval = ys
             self.xlabel = "MJD"
         
         if len(self.data.get_unc()):
@@ -423,7 +467,8 @@ class Application(Frame):
         else:
             self.ax1.scatter(Xval, self.data.get_period(),color='r',s=20,edgecolor='r',marker='o',zorder=10)
 
-        line, = self.ax1.plot(XMval, YMval, zorder=20)
+        if self.has_model():
+            line, = self.ax1.plot(XMval, YMval, zorder=20)
         
         # Label and axis
         self.ax1.set_xlabel(self.xlabel)
@@ -431,8 +476,8 @@ class Application(Frame):
         self.ax1.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
         self.ax1.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
 
-
-        ym = calc_period(self.data.get_mjd(), 0.0, 0.0,
+        if self.has_model():
+            ym = calc_period(self.data.get_mjd(), 0.0, 0.0,
                          self.p2f['P0'].val, self.p2f['P1'].val,
                          self.p2f['PEPOCH'].val, self.p2f['PB'].val,
                          self.p2f['ECC'].val, self.p2f['A1'].val,
@@ -441,11 +486,11 @@ class Application(Frame):
         
         ### Plot residuals ###
         xmin, xmax = self.ax1.get_xlim()
-        if len(self.data.get_unc()):
-            self.ax2.errorbar(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
-        else:
-            self.ax2.scatter(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, color='r',s=20,edgecolor='r',marker='o',zorder=10)
-
+        if self.has_model():
+            if len(self.data.get_unc()):
+                self.ax2.errorbar(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
+            else:
+                self.ax2.scatter(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, color='r',s=20,edgecolor='r',marker='o',zorder=10)
         self.ax2.set_xlim(xmin, xmax)
         self.ax2.set_xlabel(self.xlabel)
         self.ax2.set_ylabel("Residuals (mP0)")
@@ -530,7 +575,7 @@ class Application(Frame):
         self.set_entries()
 
         # Update the plot
-        self.plot_model(orbital=self.plot_orbital)
+        self.plot_model()
 
     def open_parfile(self):
         root.filename =  filedialog.askopenfilename(initialdir = "/",title = "Select file")
@@ -546,11 +591,9 @@ class Application(Frame):
             self.entry[ii].delete(0, END)
             if self.label[ii]=='RA':
                 s = SkyCoord(self.p2f['RA'].val, self.p2f['DEC'].val , unit='radian', frame='icrs')
-                print( s.ra.to_string(sep=':', unit='hourangle'))
                 self.entry[ii].insert(0, s.ra.to_string(sep=':', unit='hourangle'))
             elif self.label[ii]=='DEC':
                 s = SkyCoord(self.p2f['RA'].val, self.p2f['DEC'].val, unit='radian', frame='icrs')
-                print(  s.dec.to_string(sep=':', unit=u.deg))
                 self.entry[ii].insert(0, s.dec.to_string(sep=':', unit=u.deg))
             else:
                 self.entry[ii].insert(0, self.p2f[self.label[ii]].val)
@@ -579,7 +622,7 @@ class Application(Frame):
             self.plot_model()
         if event.key=='o':
             self.plot_orbital=True
-            self.plot_model(orbital=True)
+            self.plot_model()
 
     def draw_options(self):
 
