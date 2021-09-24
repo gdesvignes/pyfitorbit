@@ -258,7 +258,9 @@ class Application(Frame):
         self.xlabel="MJD"
         self.ylabel="Period (ms)"
         self.fig = Figure(facecolor='white')
-        self.fig.canvas.mpl_connect('key_press_event', self.key_press_menu)
+        #self.fig.canvas.mpl_connect('key_press_event', self.key_press_menu)
+        self.master.bind('<KeyPress>', self.key_press_menu)
+        self.master.bind('<Return>', self.onReturn)
         self.ax1 = self.fig.add_subplot(3, 1, (1,2))
         self.ax2 = self.fig.add_subplot(3, 1, 3)
         self.ax1.format_coord = lambda x, y: ""
@@ -303,18 +305,21 @@ class Application(Frame):
         toolbar = NavigationToolbar(self.canvas, toolbarFrame)
 
         self.connect()
-        #self.cidAx1 = self.ax1.callbacks.connect('xlim_changed', self.on_xlims_change)
+        self.cidAx1 = self.ax1.callbacks.connect('xlim_changed', self.on_xlims_change)
         #self.ax1.callbacks.connect('ylim_changed', self.on_ylims_change)
-        #self.cidAx2 = self.ax2.callbacks.connect('xlim_changed', self.on_xlims_change)
+        self.cidAx2 = self.ax2.callbacks.connect('xlim_changed', self.on_xlims_change)
         #self.ax2.callbacks.connect('ylim_changed', self.on_ylims_change)
         
         xmin, xmax = self.ax1.get_xlim()
         self.ax2.set_xlim(xmin, xmax)
                           
         self.canvas.draw()
+
+    def onReturn(self, *event):
+        self.master.focus_set()
         
     def connect(self):
-        #print("Connect to callbacks")
+        print("Connect to callbacks")
         self.cidAx1 = self.ax1.callbacks.connect('xlim_changed', self.on_xlims_change)
         self.cidAx2 = self.ax2.callbacks.connect('xlim_changed', self.on_xlims_change)
 
@@ -435,6 +440,7 @@ class Application(Frame):
         # Redraw plot
         self.ax1.cla()
         self.ax2.cla()
+        self.connect()
         #print "Have Unc?", self.data.get_unc()
 
         if self.plot_orbital and self.has_model():
@@ -609,18 +615,21 @@ class Application(Frame):
                 s = SkyCoord(self.ra_str, self.dec_str, unit=(u.hourangle, u.deg), frame='icrs')
                 self.p2f[self.label[ii]].val = s.dec.radian
             else:
-                self.p2f[self.label[ii]].val = float(self.entry[ii].get())
-
+                try:
+                    self.p2f[self.label[ii]].val = float(self.entry[ii].get())
+                except ValueError:
+                    pass
+                    
     def key_press_menu(self, event):
         """
         """
-        print('you pressed', event.key, event.xdata, event.ydata)
-        if event.key=='x':
+        #print('you pressed', event.keycode, event.char)
+        if event.char=='x':
             self.fit_model()
-        if event.key=='p':
+        if event.char=='p':
             self.plot_orbital=False
             self.plot_model()
-        if event.key=='o':
+        if event.char=='o':
             self.plot_orbital=True
             self.plot_model()
 
