@@ -311,6 +311,7 @@ class Application(Frame):
         #self.ax2.callbacks.connect('ylim_changed', self.on_ylims_change)
         
         xmin, xmax = self.ax1.get_xlim()
+        self.oxmin, self.oxmax =  self.ax1.get_xlim()
         self.ax2.set_xlim(xmin, xmax)
                           
         self.canvas.draw()
@@ -319,7 +320,7 @@ class Application(Frame):
         self.master.focus_set()
         
     def connect(self):
-        print("Connect to callbacks")
+        #print("Connect to callbacks")
         self.cidAx1 = self.ax1.callbacks.connect('xlim_changed', self.on_xlims_change)
         self.cidAx2 = self.ax2.callbacks.connect('xlim_changed', self.on_xlims_change)
 
@@ -329,11 +330,11 @@ class Application(Frame):
         
     def on_xlims_change(self, event_ax):
         
-        xmin, xmax =  event_ax.get_xlim()
+        self.xmin, self.xmax =  event_ax.get_xlim()
         #self.ax1.set_xlim(xmin, xmax)
         #print(xmin, xmax)
         self.disconnect()
-        self.ax2.set_xlim(xmin, xmax)
+        self.ax2.set_xlim(self.xmin, self.xmax)
         self.connect()
             
     def donothing(self):
@@ -491,13 +492,14 @@ class Application(Frame):
                          self.p2f['RA'].val, self.p2f['DEC'].val)
         
         ### Plot residuals ###
-        xmin, xmax = self.ax1.get_xlim()
+        self.ax1.set_xlim(self.xmin, self.xmax)
+        #xmin, xmax = self.ax1.get_xlim()
         if self.has_model():
             if len(self.data.get_unc()):
                 self.ax2.errorbar(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
             else:
                 self.ax2.scatter(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, color='r',s=20,edgecolor='r',marker='o',zorder=10)
-        self.ax2.set_xlim(xmin, xmax)
+        self.ax2.set_xlim(self.xmin, self.xmax)
         self.ax2.set_xlabel(self.xlabel)
         self.ax2.set_ylabel("Residuals (mP0)")
         self.ax2.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
@@ -628,9 +630,13 @@ class Application(Frame):
             self.fit_model()
         if event.char=='p':
             self.plot_orbital=False
+            self.xmin = self.oxmin
+            self.xmax = self.oxmax
             self.plot_model()
-        if event.char=='o':
+        if event.char=='o' and self.has_model():
             self.plot_orbital=True
+            self.xmin =	0
+            self.xmax =	1
             self.plot_model()
 
     def draw_options(self):
