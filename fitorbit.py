@@ -11,7 +11,7 @@ from tkinter import *
 from optparse import OptionParser
 
 import numpy as np
-from scipy.optimize import leastsq
+from lmfit import Model
 
 import matplotlib
 matplotlib.use('TkAgg')
@@ -24,8 +24,9 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 
 import parfile
-import presto.bestprof
+import presto.bestprof as bestprof
 import utils
+import textwrap
 
 DEG2RAD    = float('1.7453292519943295769236907684886127134428718885417e-2')
 RAD2DEG    = float('57.295779513082320876798154814105170332405472466564')
@@ -49,25 +50,20 @@ usage = "usage: %prog [options]"
 
 PARAMS = ['RA', 'DEC', 'P0', 'P1', 'PEPOCH', 'PB', 'ECC', 'A1', 'T0', 'OM']
 
-class Param:
-    def __init__(self, is_string=False):
-        self.val = 0.0
-        if is_string:
-            self.val = "00:00:00.0"
-        self.fit = 0
-
 class Data:
     def __init__(self):
-        self.mjds = []
-        self.period = []
-        self.unc = []
+        self.mjds = np.array([])
+        self.period = np.array([])
+        self.unc = np.array([])
 
-    def add(self, mjd1, period1, ptype='ms'):
-        self.mjds.append(mjd1)
+    def add(self, mjd1, period1, unc1, ptype='ms'):
+        self.mjds = np.append(self.mjds, mjd1)
+        self.unc = np.append(self.unc, unc1)
+        #print (mjd1, period1, unc1)
         if  ptype=='ms':
-            self.period.append(period1)
+            self.period = np.append(self.period, period1)
         elif  ptype=='s':
-            self.period.append(period1*1000.)
+            self.period = np.append(self.period, period1*1000.)
 
     def set_mjd(self, mjd):
         self.mjds = mjd
@@ -90,117 +86,47 @@ class Data:
 # Function to calc the expected period at a time x (in MJD) given the parameters
 def calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC):
 
+    #print(DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC)
+    #p0 = par0
+    #pb = par1
+    #a1 = par2
+    #om = par5
+    #e = par4
+    #t0 = par3
+
+    
     if PB:
 
         k1 = 2*np.pi*A1/(PB*86400.0*np.sqrt(1-ECC*ECC))
 
-        easc = 2*np.arctan(np.sqrt((1-ECC)/(1+ECC)) * np.tan(-OM*DEG2RAD/2))
-        epperias = T0 - PB/360.0*(easc - 180./np.pi * ECC * np.sin(easc * DEG2RAD))
+        #easc = 2*np.arctan(np.sqrt((1-ECC)/(1+ECC)) * np.tan(-np.radians(OM)/2)) # (rad)
+        #epperias = T0 - PB/360.0*(np.degrees(easc) - 180./np.pi * ECC * np.sin(easc))
 
-        mean_anom = 360*(x-epperias)/PB
+        dt = (x-T0)*86400.
+        speri = np.fmod(dt, PB*86400.)
+        speri[speri<0] += PB*86400.
+        mean_anom = 360*speri/(PB*86400)
         mean_anom = np.fmod(mean_anom,360.0)
         mean_anom = np.where(np.greater(mean_anom, 360.0), mean_anom-360.0, mean_anom)
 
         # Return ecc_anom (in rad) by iteration
         ecc_anom = utils.eccentric_anomaly(ECC, mean_anom*DEG2RAD)
-
+        #print (ecc_anom)
+        
         # Return true anomaly in deg
         true_anom = 2*RAD2DEG*np.arctan(np.sqrt((1+ECC)/(1-ECC))*np.tan(ecc_anom/2))
 
+        #print(DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC)
+        #print(k1, mean_anom, true_anom)
+        
         #print RA, DEC
         #dv = utils.deltav(x, RA, DEC, RA-DRA, DEC-DDEC, 2000.0)
         #print dv
-
         return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1 + k1*np.cos(DEG2RAD*(true_anom+OM)) + k1*ECC*np.cos(OM*DEG2RAD))
         #return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1 + k1*np.cos(DEG2RAD*(true_anom+OM)) + k1*ECC*np.cos(OM*DEG2RAD)) * (1-dv/3e8)
     else:
         return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400)
 
-# Function to calc Period residual y-f(x,...)
-def timing_fcn(param, Pobs, x, fit, fixed_values):
-    """
-    param : value of the M parameters to fit
-    Pobs : array of the f(x) values
-    x : array of the x values
-
-    fit : Array of N parameters which indicate the M parameters to fit
-    fixed_values : values of the fixed parameters
-    """
-
-    nb_fit=0
-
-
-    # DRA
-    if fit[0]!=0:
-        nb_fit+=1
-    DRA = 0.0
-
-    # DDEC
-    if fit[1]!=0:
-        nb_fit+=1
-    DDEC = 0.0
-
-    # P0
-    if fit[2]!=0:
-        P0 = param[nb_fit]
-        nb_fit+=1
-    else:
-        P0 = fixed_values[2]
-
-    # P1
-    if fit[3]!=0:
-        P1 = param[nb_fit]
-        nb_fit +=1
-    else:
-        P1 = fixed_values[3]
-
-    # PEPOCH
-    if fit[4]!=0:
-        PEPOCH = param[nb_fit]
-        nb_fit +=1
-    else:
-        PEPOCH = fixed_values[4]
-
-    # PB
-    if fit[5]!=0:
-        PB = param[nb_fit]
-        nb_fit +=1
-    else:
-        PB = fixed_values[5]
-
-    # ECC
-    if fit[6]!=0:
-        ECC = param[nb_fit]
-        nb_fit +=1
-    else:
-        ECC = fixed_values[6]
-
-    # A1
-    if fit[7]!=0:
-        A1 = param[nb_fit]
-        nb_fit +=1
-    else:
-        A1 = fixed_values[7]
-
-    # T0
-    if fit[8]!=0:
-        T0 = param[nb_fit]
-        nb_fit +=1
-    else:
-        T0 = fixed_values[8]
-
-    # A1
-    if fit[9]!=0:
-        OM = param[nb_fit]
-        nb_fit +=1
-    else:
-        OM = fixed_values[9]
-
-    # RA
-    RA = fixed_values[0]
-    DEC = fixed_values[1]
-
-    return Pobs - calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC)
 
 class Application(Frame):
 
@@ -208,6 +134,7 @@ class Application(Frame):
 
         super().__init__(master)
         self.master = master
+        have_bestprof = False
 
         self.data = Data()
 
@@ -215,23 +142,26 @@ class Application(Frame):
             suffix = '.bestprof'
             for fn in filenames:
                 if fn.endswith(suffix):
+                    have_bestprof = True
                     prof = bestprof.bestprof(fn)
+                    #print (fn, prof.epochi_bary, prof.epochf_bary, prof.p0_bary)
                     for minute in np.arange(int(prof.T/60.0+0.5)):
                         t = minute * 60.
-                        time = prof.epochi + prof.epochf + minute/1440.0
-                        period = prof.p0 + t*(prof.p1 + 0.5*t*prof.p2)
+                        time = prof.epochi_bary + prof.epochf_bary + minute/1440.0
+                        period = prof.p0_bary + t*(prof.p1_bary + 0.5*t*prof.p2_bary)
+                        unc = (prof.p0err_bary**2 + prof.p1err_bary**2 + prof.p2err_bary**2)**.5
+                        self.data.add(time, period, unc, ptype='s')
 
-                        self.data.add(time, period, ptype='s')
-
-            try:
-                mjds, periods, uncertainties = np.loadtxt(filenames[0], usecols=(0,1,2), unpack=True)
-                self.data.set_mjd(mjds)
-                self.data.set_period(periods)
-                self.data.set_unc(uncertainties)
-                #print (self.data.get_mjd(), self.data.get_period(), self.data.get_unc())
-            except:
-                print ("Input format not recognized")
-                raise
+            if not have_bestprof:
+                try:
+                    mjds, periods, uncertainties = np.loadtxt(filenames[0], usecols=(0,1,2), unpack=True)
+                    self.data.set_mjd(mjds)
+                    self.data.set_period(periods)
+                    self.data.set_unc(uncertainties)
+                    #print (self.data.get_mjd(), self.data.get_period(), self.data.get_unc())
+                except:
+                    print ("Input format not recognized")
+                    raise
 
         # Variables Init
         self.ra_str = "00:00:00"
@@ -340,6 +270,16 @@ class Application(Frame):
     def donothing(self):
         #print ('Action "%s" activated' % action.get_name())
         print('donothing')
+
+    def print_help(self):
+        print (textwrap.dedent("""
+
+        HELP: Press the following key to:
+        ---------------------------------
+        p: Plot periods vs MJD
+        o: Plot periods vs orbital phase
+        x: Fit the parameters
+        """))
         
     def create_ui(self):
         
@@ -357,7 +297,7 @@ class Application(Frame):
         editmenu.add_command(label="Undo", command=self.donothing)
 
         helpmenu = Menu(menubar, tearoff=0)
-        helpmenu.add_command(label="Help Index", command=self.donothing)
+        helpmenu.add_command(label="Help Index", command=self.print_help)
         helpmenu.add_command(label="About...", command=self.donothing)
         menubar.add_cascade(label="Help", menu=helpmenu)
         
@@ -366,35 +306,15 @@ class Application(Frame):
 
     def init_parameters(self):
         """
-        Init timing parameters
-             fit_flag[] : which parameters to fit
-             fit_values=[] : values of parameters
         """
         self.param = parfile.Parfile()
-
-        # Array for LM fit
-        self.fit_flag=[]
-        self.fit_values=[]
-        self.param2fit=[]
-        self.mjds2=[]
-        self.ps2=[]
 
         # Dict p2f for parameters to fit
         self.p2f={}
         self.label=[]
         for PARAM in PARAMS:
-            if PARAM=="RA" or PARAM=="DEC":
-                self.p2f[PARAM] = Param(is_string=True)
-            else:
-                self.p2f[PARAM] = Param()
             self.label.append(PARAM)
-            self.p2f[PARAM].val = 0.0
-
-
-        # Init self.fit to 0
-        for i in range(len(self.p2f)):
-            self.fit_flag.append(0)
-
+            self.p2f[PARAM] = 0.0
 
     def read_parfile(self, filename):
         self.parfile = filename
@@ -402,26 +322,27 @@ class Application(Frame):
 
         s = SkyCoord(self.param.RAJ, self.param.DECJ, unit=(u.hourangle, u.deg), frame='icrs')
 
-        self.p2f['RA'].val = s.ra.radian
-        self.p2f['DEC'].val = s.dec.radian
-        self.p2f['P0'].val = self.param.P0
-        self.p2f['P1'].val = self.param.P1/1e-15
-        self.p2f['PEPOCH'].val = self.param.PEPOCH
-        self.p2f['PB'].val = self.param.PB
-        self.p2f['ECC'].val = self.param.ECC
-        self.p2f['A1'].val = self.param.A1
-        self.p2f['T0'].val = self.param.T0
-        self.p2f['OM'].val = self.param.OM
+        self.p2f['RA'] = s.ra.radian
+        self.p2f['DEC'] = s.dec.radian
+        self.p2f['P0'] = self.param.P0
+        self.p2f['P1'] = self.param.P1/1e-15
+        self.p2f['PEPOCH'] = self.param.PEPOCH
+        self.p2f['PB'] = self.param.PB
+        self.p2f['ECC'] = self.param.ECC
+        self.p2f['A1'] = self.param.A1
+        self.p2f['T0'] = self.param.T0
+        self.p2f['OM'] = self.param.OM
 
     def has_model(self):
-        if self.p2f['P0'].val and self.p2f['PB'].val and self.p2f['A1'].val:
+        #if self.p2f['P0'] and self.p2f['PB'] and self.p2f['A1']:
+        if self.p2f['P0']:
             return True
         else:
             return False
         
     def write_parfile(self):
         for PARAM in PARAMS:
-            self.param.set_param(PARAM, self.p2f[PARAM].val)
+            self.param.set_param(PARAM, self.p2f[PARAM])
         filename =  filedialog.asksaveasfilename(title = "Save file")
         self.param.write(filename)
 
@@ -433,7 +354,7 @@ class Application(Frame):
         xs=np.linspace(min(self.data.get_mjd()), max(self.data.get_mjd()), 20000)
 
         if self.has_model():
-            ys=calc_period(xs, 0.0, 0.0, self.p2f['P0'].val, self.p2f['P1'].val, self.p2f['PEPOCH'].val, self.p2f['PB'].val, self.p2f['ECC'].val, self.p2f['A1'].val, self.p2f['T0'].val, self.p2f['OM'].val, self.p2f['RA'].val, self.p2f['DEC'].val)
+            ys=calc_period(xs, 0.0, 0.0, self.p2f['P0'], self.p2f['P1'], self.p2f['PEPOCH'], self.p2f['PB'], self.p2f['ECC'], self.p2f['A1'], self.p2f['T0'], self.p2f['OM'], self.p2f['RA'], self.p2f['DEC'])
 
             # Convert into a Numpy array
             ys=np.asarray(ys)
@@ -445,10 +366,10 @@ class Application(Frame):
         #print "Have Unc?", self.data.get_unc()
 
         if self.plot_orbital and self.has_model():
-            Xval = np.modf((self.data.get_mjd()-self.p2f['T0'].val)/self.p2f['PB'].val)[0]
+            Xval = np.modf((self.data.get_mjd()-self.p2f['T0'])/self.p2f['PB'])[0]
             Xval = np.where(Xval<0, Xval+1, Xval)
             #print (Xval)
-            XMval = np.modf((xs-self.p2f['T0'].val)/self.p2f['PB'].val)[0]
+            XMval = np.modf((xs-self.p2f['T0'])/self.p2f['PB'])[0]
             XMval = np.where(XMval<0, XMval+1, XMval)
 
             ids = np.argsort(XMval)
@@ -485,20 +406,20 @@ class Application(Frame):
 
         if self.has_model():
             ym = calc_period(self.data.get_mjd(), 0.0, 0.0,
-                         self.p2f['P0'].val, self.p2f['P1'].val,
-                         self.p2f['PEPOCH'].val, self.p2f['PB'].val,
-                         self.p2f['ECC'].val, self.p2f['A1'].val,
-                         self.p2f['T0'].val, self.p2f['OM'].val,
-                         self.p2f['RA'].val, self.p2f['DEC'].val)
+                         self.p2f['P0'], self.p2f['P1'],
+                         self.p2f['PEPOCH'], self.p2f['PB'],
+                         self.p2f['ECC'], self.p2f['A1'],
+                         self.p2f['T0'], self.p2f['OM'],
+                         self.p2f['RA'], self.p2f['DEC'])
         
         ### Plot residuals ###
         self.ax1.set_xlim(self.xmin, self.xmax)
         #xmin, xmax = self.ax1.get_xlim()
         if self.has_model():
             if len(self.data.get_unc()):
-                self.ax2.errorbar(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
+                self.ax2.errorbar(Xval, (self.data.get_period() - ym) / self.p2f['P0'], yerr=self.data.get_unc(), color='r',fmt='o',zorder=10)
             else:
-                self.ax2.scatter(Xval, (self.data.get_period() - ym) / self.p2f['P0'].val, color='r',s=20,edgecolor='r',marker='o',zorder=10)
+                self.ax2.scatter(Xval, (self.data.get_period() - ym) / self.p2f['P0'], color='r',s=20,edgecolor='r',marker='o',zorder=10)
         self.ax2.set_xlim(self.xmin, self.xmax)
         self.ax2.set_xlabel(self.xlabel)
         self.ax2.set_ylabel("Residuals (mP0)")
@@ -512,72 +433,74 @@ class Application(Frame):
         """
         Function to perform the fit of selected parameters to the values
         """
-
+        # create lmfit model
+        fmodel = Model(calc_period)
+        
         # Retrieve values of parameters
-        self.fit_values = []
         self.get_entries()
-        for ii in range(len(self.p2f)):
-            self.fit_values.append(self.p2f[self.label[ii]].val)
-
-        # Set input parameters
-        self.intput_param = []
+        params = fmodel.make_params(DRA=0, DDEC=0, P0=self.p2f['P0'], \
+                                    P1=self.p2f['P1'], \
+                                    PEPOCH=self.p2f['PEPOCH'], \
+                                    PB=self.p2f['PB'], \
+                                    ECC=self.p2f['ECC'], \
+                                    A1=self.p2f['A1'], \
+                                    T0=self.p2f['T0'], \
+                                    OM=self.p2f['OM'], \
+                                    RA=self.p2f['RA'], \
+                                    DEC=self.p2f['DEC'])
+        
+        # Set which parameters to fit
+        do_fit = False
+        params['DRA'].vary = False
+        params['DDEC'].vary = False
         for ii,param in enumerate(self.v):
             if param.get():
-                self.intput_param.append( self.fit_values[ii] )
-                self.fit_flag[ii] = 1
+                params[self.label[ii]].vary = True
+                do_fit = True
             else:
-                self.fit_flag[ii] = 0
-
-        # If no parameters will be fitted, return now !
-        if not self.intput_param:
+                params[self.label[ii]].vary = False
+                
+        # If no parameters to fit, return now !
+        if not do_fit:
             return
 
         # Retrieve which points to include (points in the window)
-        self.ps2=[]
-        self.mjds2=[]
         if self.plot_orbital:
             xmin = np.min(self.data.get_mjd())
             xmax = np.max(self.data.get_mjd())
         else:
             xmin,xmax=self.ax1.get_xlim()
-        for mjd,period in zip(self.data.get_mjd(), self.data.get_period()):
-            if(xmin<mjd and mjd<xmax):
-                self.mjds2.append(mjd)
-                self.ps2.append(period)
-
-        self.mjds2 = np.asarray(self.mjds2)
-        self.ps2 = np.asarray(self.ps2)
-        #print self.mjds2,self.ps2
-
-        # Do least square fit
-        print ('Input Parameters :\n',self.intput_param)
-        plsq = leastsq(timing_fcn, self.intput_param, args=(self.ps2, self.mjds2, self.fit_flag, self.fit_values))
-        print ('Parameters fitted :\n', plsq[0])
-
-        print ('chi**2 = ',np.sum(np.power(timing_fcn(self.intput_param,self.ps2, self.mjds2, self.fit_flag, self.fit_values),2)))
-
-        # Return new parameters values in boxes
-        j=0
-        for i,dofit in enumerate(self.fit_flag):
-            #print i,dofit, plsq
-            if dofit:
-                if sum(self.fit_flag)>=1:
-                    val = plsq[0][j]
-                else:
-                    val = plsq[0]
-
-                self.p2f[self.label[i]].val = val
-                j+=1
+        mjds = self.data.get_mjd()
+        periods = self.data.get_period()
+        uncs = self.data.get_unc()
+        self.mjds2 = mjds[np.where((xmin<mjds) & (mjds<xmax))]
+        self.periods2 = periods[np.where((xmin<mjds) & (mjds<xmax))]
+        if uncs.size==0:
+            # Do the actual fit
+            result = fmodel.fit(self.periods2, params, x=self.mjds2, max_nfev=50)
+        else:
+            print("Do weighted fit")
+            self.unc2 = uncs[np.where((xmin<mjds) & (mjds<xmax))]
+            # Do the actual fit
+            result = fmodel.fit(self.periods2, params, x=self.mjds2, weights=1/self.unc2, max_nfev=50)
+        print(result.fit_report())
+        
+        for par in PARAMS:
+            self.p2f[par] = result.params[par].value
                 
-        # Wrap Omega if needed  
-        while self.p2f['OM'].val < 0:
-            self.p2f['OM'].val += 360.
-        while self.p2f['OM'].val > 360:
-            self.p2f['OM'].val -= 360.    
-
-        while self.p2f['A1'].val < 0:
-            self.p2f['A1'].val *= - 1
-            self.p2f['T0'].val += self.p2f['PB'].val/2.
+        # Wrap parameters if needed  
+        while self.p2f['A1'] < 0:
+            self.p2f['A1'] *= - 1
+            self.p2f['T0'] += self.p2f['PB']/2.
+        while self.p2f['ECC'] < 0:
+            self.p2f['ECC'] *= -1
+            self.p2f['OM'] += 180.
+            self.p2f['T0'] += self.p2f['PB']/2.
+        while self.p2f['OM'] < 0:
+            self.p2f['OM'] += 360.
+        while self.p2f['OM'] > 360:
+            self.p2f['OM'] -= 360.
+            
             
         # Update the parameters entries
         self.set_entries()
@@ -598,27 +521,27 @@ class Application(Frame):
         for ii in range(len(self.p2f)):
             self.entry[ii].delete(0, END)
             if self.label[ii]=='RA':
-                s = SkyCoord(self.p2f['RA'].val, self.p2f['DEC'].val , unit='radian', frame='icrs')
+                s = SkyCoord(self.p2f['RA'], self.p2f['DEC'] , unit='radian', frame='icrs')
                 self.entry[ii].insert(0, s.ra.to_string(sep=':', unit='hourangle'))
             elif self.label[ii]=='DEC':
-                s = SkyCoord(self.p2f['RA'].val, self.p2f['DEC'].val, unit='radian', frame='icrs')
+                s = SkyCoord(self.p2f['RA'], self.p2f['DEC'], unit='radian', frame='icrs')
                 self.entry[ii].insert(0, s.dec.to_string(sep=':', unit=u.deg))
             else:
-                self.entry[ii].insert(0, self.p2f[self.label[ii]].val)
+                self.entry[ii].insert(0, self.p2f[self.label[ii]])
 
     def get_entries(self):
         for ii in range(len(self.p2f)):
             if self.label[ii]=='RA':
                 self.ra_str = self.entry[ii].get()
                 s = SkyCoord(self.ra_str, self.dec_str, unit=(u.hourangle, u.deg), frame='icrs')
-                self.p2f[self.label[ii]].val = s.ra.radian
+                self.p2f[self.label[ii]] = s.ra.radian
             elif self.label[ii]=='DEC':
                 self.dec_str = self.entry[ii].get()
                 s = SkyCoord(self.ra_str, self.dec_str, unit=(u.hourangle, u.deg), frame='icrs')
-                self.p2f[self.label[ii]].val = s.dec.radian
+                self.p2f[self.label[ii]] = s.dec.radian
             else:
                 try:
-                    self.p2f[self.label[ii]].val = float(self.entry[ii].get())
+                    self.p2f[self.label[ii]] = float(self.entry[ii].get())
                 except ValueError:
                     pass
                     
@@ -626,6 +549,8 @@ class Application(Frame):
         """
         """
         #print('you pressed', event.keycode, event.char)
+        if event.char=='h':
+            self.print_help()
         if event.char=='x':
             self.fit_model()
         if event.char=='p':
@@ -659,8 +584,6 @@ class Application(Frame):
 
     # Which param to held fixed
     def set_fit(self, ii):
-        #print ("Parameter %s was toggled %s" % (data, ("OFF", "ON")[widget.get_active()]))
-        print (self.v[ii].get())
         if self.v[ii].get():
             self.v[ii].set(0)
         else:
@@ -668,7 +591,6 @@ class Application(Frame):
 
     def draw_param(self):
 
-        #self.ivar = IntVar()
         self.v = [0] * len(PARAMS)
         self.checkbut = [None] * len(PARAMS)
         self.entry = [None] * len(PARAMS)
@@ -677,7 +599,9 @@ class Application(Frame):
             for j in range(0,2):
                 self.v[ii] = IntVar()
                 self.v[ii].set(0)
-                self.checkbut[ii] = Checkbutton(self.master, text = self.label[ii], variable = self.v, command= lambda ii=ii: self.set_fit(ii))
+                if self.label[ii]=='PEPOCH' or self.label[ii]=='RA' or self.label[ii]=='DEC': state = 'disabled'
+                else: state = 'normal'
+                self.checkbut[ii] = Checkbutton(self.master, text = self.label[ii], variable = self.v, command= lambda ii=ii: self.set_fit(ii), state=state)
                 self.checkbut[ii].grid(row=i, column=1+j*2)
                 self.entry[ii] = Entry(self.master)
                 self.entry[ii].grid(row=i, column=2+j*2)
