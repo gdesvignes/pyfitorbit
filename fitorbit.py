@@ -110,7 +110,7 @@ def calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC):
         mean_anom = np.where(np.greater(mean_anom, 360.0), mean_anom-360.0, mean_anom)
 
         # Return ecc_anom (in rad) by iteration
-        ecc_anom = utils.eccentric_anomaly(ECC, mean_anom*DEG2RAD)
+        ecc_anom = utils.eccentric_anomaly2(ECC, mean_anom*DEG2RAD)
         #print (ecc_anom)
         
         # Return true anomaly in deg
@@ -448,6 +448,10 @@ class Application(Frame):
                                     OM=self.p2f['OM'], \
                                     RA=self.p2f['RA'], \
                                     DEC=self.p2f['DEC'])
+        
+        # Set boundaries for eccentricity
+        params['ECC'].min = 0.0
+        params['ECC'].max = 1.0
         
         # Set which parameters to fit
         do_fit = False

@@ -28,12 +28,13 @@ def eccentric_anomaly(E, mean_anomaly):
     ecc_anom_old = ma
     ecc_anom = ma + eccentricity*Num.sin(ecc_anom_old)
     # This is a simple iteration to solve Kepler's Equation
-    if (Num.alen(ecc_anom) >1):
+    if (len(ecc_anom) >1):
         while (Num.maximum.reduce(Num.fabs(ecc_anom-ecc_anom_old)) > 5e-15):
             ecc_anom_old = ecc_anom
             ecc_anom = ma + eccentricity*Num.sin(ecc_anom_old)
-
-    elif(Num.alen(ecc_anom) ==1):
+            #print(ecc_anom_old, ecc_anom)
+            
+    elif(len(ecc_anom) ==1):
         while (Num.fabs(ecc_anom-ecc_anom_old) > 5e-15):
             ecc_anom_old = ecc_anom
             ecc_anom = ma + eccentricity*Num.sin(ecc_anom_old)
@@ -63,5 +64,6 @@ def eccentric_anomaly2(e, M, tolerance=1e-14):
         E0 = E
         count += 1
         if count == MAX_ITERATIONS:
-            raise ConvergenceError('Did not converge after {n} iterations. (e={e!r}, M={M!r})'.format(n=MAX_ITERATIONS, e=e, M=M))
+            print('Did not converge after {n} iterations. (e={e!r}, M={M!r})'.format(n=MAX_ITERATIONS, e=e, M=M))
+            break
     return E
