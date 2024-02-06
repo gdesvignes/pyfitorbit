@@ -122,10 +122,10 @@ def calc_period(x, DRA, DDEC, P0, P1, PEPOCH, PB, ECC, A1, T0, OM, RA, DEC):
         #print RA, DEC
         #dv = utils.deltav(x, RA, DEC, RA-DRA, DEC-DDEC, 2000.0)
         #print dv
-        return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1 + k1*np.cos(DEG2RAD*(true_anom+OM)) + k1*ECC*np.cos(OM*DEG2RAD))
-        #return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400) * (1 + k1*np.cos(DEG2RAD*(true_anom+OM)) + k1*ECC*np.cos(OM*DEG2RAD)) * (1-dv/3e8)
+        return 1000*(P0+P1*(x-PEPOCH)*86400) * (1 + k1*np.cos(DEG2RAD*(true_anom+OM)) + k1*ECC*np.cos(OM*DEG2RAD))
+        #return 1000*(P0+P1*(x-PEPOCH)*86400) * (1 + k1*np.cos(DEG2RAD*(true_anom+OM)) + k1*ECC*np.cos(OM*DEG2RAD)) * (1-dv/3e8)
     else:
-        return 1000*(P0+P1*1e-15*(x-PEPOCH)*86400)
+        return 1000*(P0+P1*(x-PEPOCH)*86400)
 
 
 class Application(Frame):
@@ -325,7 +325,7 @@ class Application(Frame):
         self.p2f['RA'] = s.ra.radian
         self.p2f['DEC'] = s.dec.radian
         self.p2f['P0'] = self.param.P0
-        self.p2f['P1'] = self.param.P1/1e-15
+        self.p2f['P1'] = self.param.P1
         self.p2f['PEPOCH'] = self.param.PEPOCH
         self.p2f['PB'] = self.param.PB
         self.p2f['ECC'] = self.param.ECC
